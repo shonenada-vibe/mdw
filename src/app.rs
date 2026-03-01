@@ -14,6 +14,7 @@ use crate::watcher;
 pub struct App {
     file_path: PathBuf,
     is_markdown: bool,
+    is_json: bool,
     raw_content: String,
     rendered_content: Text<'static>,
     total_lines: usize,
@@ -26,14 +27,14 @@ pub struct App {
 
 impl App {
     pub fn new(file_path: PathBuf, config: Config) -> anyhow::Result<Self> {
-        let is_markdown = file_path
-            .extension()
-            .map(|ext| ext == "md" || ext == "markdown" || ext == "mdx")
-            .unwrap_or(false);
+        let ext = file_path.extension().and_then(|e| e.to_str());
+        let is_markdown = ext.is_some_and(|e| matches!(e, "md" | "markdown" | "mdx"));
+        let is_json = ext.is_some_and(|e| e == "json");
 
         let mut app = App {
             file_path,
             is_markdown,
+            is_json,
             raw_content: String::new(),
             rendered_content: Text::default(),
             total_lines: 0,
@@ -83,6 +84,8 @@ impl App {
 
         self.rendered_content = if self.is_markdown {
             markdown::render_markdown(&self.raw_content, &self.config.theme)
+        } else if self.is_json {
+            markdown::render_json(&self.raw_content, &self.config.theme)
         } else {
             markdown::render_plain(&self.raw_content)
         };

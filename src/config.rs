@@ -274,6 +274,12 @@ pub struct ThemeConfig {
     pub status_bar_bg: ThemeColor,
     pub status_bar_fg: ThemeColor,
     pub status_bar_message_fg: ThemeColor,
+    pub json_key: ThemeColor,
+    pub json_string: ThemeColor,
+    pub json_number: ThemeColor,
+    pub json_boolean: ThemeColor,
+    pub json_null: ThemeColor,
+    pub json_punctuation: ThemeColor,
 }
 
 impl Default for ThemeConfig {
@@ -296,6 +302,12 @@ impl Default for ThemeConfig {
             status_bar_bg: ThemeColor(Color::DarkGray),
             status_bar_fg: ThemeColor(Color::White),
             status_bar_message_fg: ThemeColor(Color::Yellow),
+            json_key: ThemeColor(Color::Cyan),
+            json_string: ThemeColor(Color::Green),
+            json_number: ThemeColor(Color::LightYellow),
+            json_boolean: ThemeColor(Color::Yellow),
+            json_null: ThemeColor(Color::DarkGray),
+            json_punctuation: ThemeColor(Color::White),
         }
     }
 }
@@ -422,6 +434,12 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # status_bar_bg = "darkgray"
 # status_bar_fg = "white"
 # status_bar_message_fg = "yellow"
+# json_key = "cyan"
+# json_string = "green"
+# json_number = "lightyellow"
+# json_boolean = "yellow"
+# json_null = "darkgray"
+# json_punctuation = "white"
 
 # [behavior]
 # line_wrap = true

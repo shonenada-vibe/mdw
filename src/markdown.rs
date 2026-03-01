@@ -4,6 +4,112 @@ use ratatui::text::{Line, Span, Text};
 
 use crate::config::ThemeConfig;
 
+pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
+    let pretty = match serde_json::from_str::<serde_json::Value>(input) {
+        Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| input.to_string()),
+        Err(_) => return render_plain(input),
+    };
+
+    let key_style = Style::default().fg(theme.json_key.0);
+    let string_style = Style::default().fg(theme.json_string.0);
+    let number_style = Style::default().fg(theme.json_number.0);
+    let bool_style = Style::default().fg(theme.json_boolean.0);
+    let null_style = Style::default().fg(theme.json_null.0);
+    let punct_style = Style::default().fg(theme.json_punctuation.0);
+
+    let lines: Vec<Line<'static>> = pretty
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let indent = &line[..line.len() - trimmed.len()];
+            let mut spans: Vec<Span<'static>> = Vec::new();
+
+            if !indent.is_empty() {
+                spans.push(Span::raw(indent.to_string()));
+            }
+
+            let mut chars = trimmed.char_indices().peekable();
+            while let Some(&(i, ch)) = chars.peek() {
+                match ch {
+                    '"' => {
+                        // Find the end of the string (handling escapes)
+                        let mut end = i + 1;
+                        let bytes = trimmed.as_bytes();
+                        while end < bytes.len() {
+                            if bytes[end] == b'\\' {
+                                end += 2; // skip escaped char
+                            } else if bytes[end] == b'"' {
+                                end += 1;
+                                break;
+                            } else {
+                                end += 1;
+                            }
+                        }
+                        let s = &trimmed[i..end];
+
+                        // Check if this string is a key (followed by ':')
+                        let rest = trimmed[end..].trim_start();
+                        let style = if rest.starts_with(':') {
+                            key_style
+                        } else {
+                            string_style
+                        };
+
+                        spans.push(Span::styled(s.to_string(), style));
+                        // Advance the iterator past the string
+                        while chars.peek().is_some_and(|&(j, _)| j < end) {
+                            chars.next();
+                        }
+                    }
+                    '{' | '}' | '[' | ']' | ':' | ',' => {
+                        spans.push(Span::styled(ch.to_string(), punct_style));
+                        chars.next();
+                    }
+                    _ if ch.is_ascii_digit() || ch == '-' => {
+                        // Number
+                        let start = i;
+                        chars.next();
+                        while chars
+                            .peek()
+                            .is_some_and(|&(_, c)| c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-')
+                        {
+                            chars.next();
+                        }
+                        let end = chars.peek().map_or(trimmed.len(), |&(j, _)| j);
+                        let token = &trimmed[start..end];
+                        // Verify it's actually a number (not just a '-' before something else)
+                        if token.parse::<f64>().is_ok() {
+                            spans.push(Span::styled(token.to_string(), number_style));
+                        } else {
+                            spans.push(Span::raw(token.to_string()));
+                        }
+                    }
+                    't' if trimmed[i..].starts_with("true") => {
+                        spans.push(Span::styled("true".to_string(), bool_style));
+                        for _ in 0..4 { chars.next(); }
+                    }
+                    'f' if trimmed[i..].starts_with("false") => {
+                        spans.push(Span::styled("false".to_string(), bool_style));
+                        for _ in 0..5 { chars.next(); }
+                    }
+                    'n' if trimmed[i..].starts_with("null") => {
+                        spans.push(Span::styled("null".to_string(), null_style));
+                        for _ in 0..4 { chars.next(); }
+                    }
+                    _ => {
+                        spans.push(Span::raw(ch.to_string()));
+                        chars.next();
+                    }
+                }
+            }
+
+            Line::from(spans)
+        })
+        .collect();
+
+    Text::from(lines)
+}
+
 pub fn render_plain(input: &str) -> Text<'static> {
     let lines: Vec<Line<'static>> = input
         .lines()
