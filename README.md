@@ -10,12 +10,7 @@
 
 ## Screenshot
 
-<!-- TODO: Add a screenshot of mdw in action -->
-<!-- Run: mdw test.md, then take a screenshot and save it as assets/screenshot.png -->
-<!-- Then uncomment the line below: -->
-<!-- ![screenshot](assets/screenshot.png) -->
-
-*Screenshot coming soon.*
+![screenshot](assets/screenshot.jpg)
 
 ## Features
 
