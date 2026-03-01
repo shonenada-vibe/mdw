@@ -22,6 +22,33 @@
 
 ## Installation
 
+### Homebrew
+
+```sh
+brew tap shonenada/tap
+brew install shonenada/tap/mdw
+```
+
+### Shell script
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shonenada-vibe/mdw/main/scripts/install.sh | bash
+```
+
+To install a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shonenada-vibe/mdw/main/scripts/install.sh | bash -s -- v0.1.0
+```
+
+To install to a custom directory:
+
+```sh
+MDW_INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/shonenada-vibe/mdw/main/scripts/install.sh | bash
+```
+
+### From source
+
 ```sh
 cargo install --path .
 ```
