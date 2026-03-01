@@ -1,6 +1,8 @@
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
+
+use crate::config::ThemeConfig;
 
 pub fn render_plain(input: &str) -> Text<'static> {
     let lines: Vec<Line<'static>> = input
@@ -10,12 +12,12 @@ pub fn render_plain(input: &str) -> Text<'static> {
     Text::from(lines)
 }
 
-pub fn render_markdown(input: &str) -> Text<'static> {
+pub fn render_markdown(input: &str, theme: &ThemeConfig) -> Text<'static> {
     let options = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(input, options);
-    let mut writer = MarkdownWriter::new();
+    let mut writer = MarkdownWriter::new(theme.clone());
 
     for event in parser {
         writer.handle_event(event);
@@ -38,10 +40,11 @@ struct MarkdownWriter {
     code_block_lines: Vec<String>,
     in_blockquote: bool,
     link_url: Option<String>,
+    theme: ThemeConfig,
 }
 
 impl MarkdownWriter {
-    fn new() -> Self {
+    fn new(theme: ThemeConfig) -> Self {
         Self {
             lines: Vec::new(),
             current_spans: Vec::new(),
@@ -51,6 +54,7 @@ impl MarkdownWriter {
             code_block_lines: Vec::new(),
             in_blockquote: false,
             link_url: None,
+            theme,
         }
     }
 
@@ -99,8 +103,8 @@ impl MarkdownWriter {
             }
             Event::Code(code) => {
                 let style = Style::default()
-                    .fg(Color::LightYellow)
-                    .bg(Color::DarkGray);
+                    .fg(self.theme.inline_code_fg.0)
+                    .bg(self.theme.inline_code_bg.0);
                 self.current_spans.push(Span::styled(
                     format!(" {code} "),
                     style,
@@ -118,7 +122,7 @@ impl MarkdownWriter {
                 self.push_blank_line();
                 self.lines.push(Line::from(Span::styled(
                     "─".repeat(80),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(self.theme.horizontal_rule.0),
                 )));
                 self.push_blank_line();
             }
@@ -137,12 +141,12 @@ impl MarkdownWriter {
                 self.flush_line();
                 self.push_blank_line();
                 let (color, prefix) = match level {
-                    HeadingLevel::H1 => (Color::Magenta, "# "),
-                    HeadingLevel::H2 => (Color::Cyan, "## "),
-                    HeadingLevel::H3 => (Color::Yellow, "### "),
-                    HeadingLevel::H4 => (Color::Green, "#### "),
-                    HeadingLevel::H5 => (Color::Blue, "##### "),
-                    HeadingLevel::H6 => (Color::White, "###### "),
+                    HeadingLevel::H1 => (self.theme.heading1.0, "# "),
+                    HeadingLevel::H2 => (self.theme.heading2.0, "## "),
+                    HeadingLevel::H3 => (self.theme.heading3.0, "### "),
+                    HeadingLevel::H4 => (self.theme.heading4.0, "#### "),
+                    HeadingLevel::H5 => (self.theme.heading5.0, "##### "),
+                    HeadingLevel::H6 => (self.theme.heading6.0, "###### "),
                 };
                 let style = Style::default()
                     .fg(color)
@@ -159,10 +163,11 @@ impl MarkdownWriter {
             Tag::BlockQuote(_) => {
                 self.flush_line();
                 self.in_blockquote = true;
-                self.style_stack.push(Style::default().fg(Color::Green));
+                let bq_color = self.theme.blockquote.0;
+                self.style_stack.push(Style::default().fg(bq_color));
                 self.current_spans.push(Span::styled(
                     "│ ".to_string(),
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(bq_color),
                 ));
             }
             Tag::CodeBlock(_) => {
@@ -197,7 +202,7 @@ impl MarkdownWriter {
                 self.link_url = Some(dest_url.to_string());
                 self.style_stack.push(
                     Style::default()
-                        .fg(Color::Blue)
+                        .fg(self.theme.link.0)
                         .add_modifier(Modifier::UNDERLINED),
                 );
             }
@@ -237,8 +242,8 @@ impl MarkdownWriter {
             }
             TagEnd::CodeBlock => {
                 let code_style = Style::default()
-                    .fg(Color::LightGreen)
-                    .bg(Color::Rgb(40, 40, 40));
+                    .fg(self.theme.code_block_fg.0)
+                    .bg(self.theme.code_block_bg.0);
                 for code_line in self.code_block_lines.drain(..) {
                     // Split by newlines within the code text
                     for line in code_line.split('\n') {
@@ -283,7 +288,7 @@ impl MarkdownWriter {
                 if let Some(url) = self.link_url.take() {
                     self.current_spans.push(Span::styled(
                         format!(" ({url})"),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(self.theme.link_url.0),
                     ));
                 }
             }
@@ -295,7 +300,7 @@ impl MarkdownWriter {
                 self.flush_line();
                 self.lines.push(Line::from(Span::styled(
                     "─".repeat(80),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(self.theme.horizontal_rule.0),
                 )));
             }
             TagEnd::TableRow => {
