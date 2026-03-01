@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
-use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::DefaultTerminal;
 use ratatui::text::Text;
 
+use crate::config::{Action, Config};
 use crate::event::{AppEvent, EventHandler};
 use crate::markdown;
 use crate::ui;
@@ -21,10 +21,11 @@ pub struct App {
     viewport_height: u16,
     should_quit: bool,
     status_message: String,
+    config: Config,
 }
 
 impl App {
-    pub fn new(file_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(file_path: PathBuf, config: Config) -> anyhow::Result<Self> {
         let is_markdown = file_path
             .extension()
             .map(|ext| ext == "md" || ext == "markdown" || ext == "mdx")
@@ -40,6 +41,7 @@ impl App {
             viewport_height: 0,
             should_quit: false,
             status_message: String::new(),
+            config,
         };
 
         app.reload_file()?;
@@ -51,7 +53,7 @@ impl App {
 
         let canonical = self.file_path.canonicalize()
             .with_context(|| format!("Failed to canonicalize path: {}", self.file_path.display()))?;
-        let _watcher = watcher::setup_watcher(&canonical, tx)?;
+        let _watcher = watcher::setup_watcher(&canonical, tx, self.config.behavior.debounce_ms)?;
 
         while !self.should_quit {
             terminal.draw(|frame| ui::render(frame, self))?;
@@ -80,7 +82,7 @@ impl App {
             .with_context(|| format!("Failed to read {}", self.file_path.display()))?;
 
         self.rendered_content = if self.is_markdown {
-            markdown::render_markdown(&self.raw_content)
+            markdown::render_markdown(&self.raw_content, &self.config.theme)
         } else {
             markdown::render_plain(&self.raw_content)
         };
@@ -91,57 +93,36 @@ impl App {
     }
 
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
-        match (key.modifiers, key.code) {
-            // Quit
-            (_, KeyCode::Char('q')) => self.should_quit = true,
-            (KeyModifiers::CONTROL, KeyCode::Char('c')) => self.should_quit = true,
+        let Some(action) = self.config.keybindings.resolve_action(&key) else {
+            return;
+        };
 
-            // Scroll down one line
-            (KeyModifiers::NONE, KeyCode::Char('j')) | (_, KeyCode::Down) => {
-                self.scroll_down(1);
-            }
+        let scroll_speed = self.config.behavior.scroll_speed;
 
-            // Scroll up one line
-            (KeyModifiers::NONE, KeyCode::Char('k')) | (_, KeyCode::Up) => {
-                self.scroll_up(1);
-            }
-
-            // Half-page down
-            (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+        match action {
+            Action::Quit => self.should_quit = true,
+            Action::ScrollDown => self.scroll_down(scroll_speed),
+            Action::ScrollUp => self.scroll_up(scroll_speed),
+            Action::HalfPageDown => {
                 let half = (self.viewport_height / 2).max(1);
                 self.scroll_down(half as usize);
             }
-
-            // Half-page up
-            (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+            Action::HalfPageUp => {
                 let half = (self.viewport_height / 2).max(1);
                 self.scroll_up(half as usize);
             }
-
-            // Full page down
-            (KeyModifiers::CONTROL, KeyCode::Char('f')) | (_, KeyCode::PageDown) => {
+            Action::PageDown => {
                 self.scroll_down(self.viewport_height as usize);
             }
-
-            // Full page up
-            (KeyModifiers::CONTROL, KeyCode::Char('b')) | (_, KeyCode::PageUp) => {
+            Action::PageUp => {
                 self.scroll_up(self.viewport_height as usize);
             }
-
-            // Go to top
-            (KeyModifiers::NONE, KeyCode::Char('g')) | (_, KeyCode::Home) => {
+            Action::Top => {
                 self.scroll_offset = 0;
             }
-
-            // Go to bottom
-            (KeyModifiers::SHIFT, KeyCode::Char('G')) | (_, KeyCode::End) => {
+            Action::Bottom => {
                 self.scroll_to_bottom();
             }
-            (KeyModifiers::NONE, KeyCode::Char('G')) => {
-                self.scroll_to_bottom();
-            }
-
-            _ => {}
         }
     }
 
@@ -194,5 +175,9 @@ impl App {
 
     pub fn set_viewport_height(&mut self, height: u16) {
         self.viewport_height = height;
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 }
