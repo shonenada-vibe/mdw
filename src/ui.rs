@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 
@@ -17,10 +17,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     app.set_viewport_height(chunks[0].height);
 
+    let theme = &app.config().theme;
+
     // Content
-    let content = Paragraph::new(app.rendered_content().clone())
-        .scroll((app.scroll_offset(), 0))
-        .wrap(Wrap { trim: false });
+    let mut content = Paragraph::new(app.rendered_content().clone())
+        .scroll((app.scroll_offset(), 0));
+    if app.config().behavior.line_wrap {
+        content = content.wrap(Wrap { trim: false });
+    }
     frame.render_widget(content, chunks[0]);
 
     // Scrollbar
@@ -30,6 +34,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(scrollbar, chunks[0], &mut scrollbar_state);
 
     // Status bar
+    let status_bar_bg = theme.status_bar_bg.0;
+    let status_bar_fg = theme.status_bar_fg.0;
+    let status_bar_message_fg = theme.status_bar_message_fg.0;
+
     let scroll_info = format!(
         " {} | {}/{} ",
         app.file_path_display(),
@@ -39,14 +47,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let status_bar = Paragraph::new(Line::from(vec![
         Span::styled(
             scroll_info,
-            Style::default().bg(Color::DarkGray).fg(Color::White),
+            Style::default().bg(status_bar_bg).fg(status_bar_fg),
         ),
         Span::styled(
             format!(" {} ", app.status_message()),
-            Style::default().bg(Color::DarkGray).fg(Color::Yellow),
+            Style::default().bg(status_bar_bg).fg(status_bar_message_fg),
         ),
     ]))
-    .style(Style::default().bg(Color::DarkGray));
+    .style(Style::default().bg(status_bar_bg));
 
     frame.render_widget(status_bar, chunks[1]);
 }
