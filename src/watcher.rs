@@ -10,9 +10,10 @@ use crate::event::AppEvent;
 pub fn setup_watcher(
     path: &Path,
     tx: mpsc::Sender<AppEvent>,
+    debounce_ms: u64,
 ) -> anyhow::Result<Debouncer<notify::RecommendedWatcher>> {
     let mut debouncer = new_debouncer(
-        Duration::from_millis(200),
+        Duration::from_millis(debounce_ms),
         move |result: DebounceEventResult| {
             if let Ok(events) = result {
                 if !events.is_empty() {
