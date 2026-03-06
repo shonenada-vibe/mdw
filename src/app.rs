@@ -36,6 +36,7 @@ pub struct App {
     current_match: Option<usize>,
     link_infos: Vec<LinkInfo>,
     gutter_width: usize,
+    hover_line: Option<usize>,
 }
 
 impl App {
@@ -68,6 +69,7 @@ impl App {
             current_match: None,
             link_infos: Vec::new(),
             gutter_width: 0,
+            hover_line: None,
         };
 
         app.reload_file()?;
@@ -97,6 +99,7 @@ impl App {
             current_match: None,
             link_infos: Vec::new(),
             gutter_width: 0,
+            hover_line: None,
         };
 
         app.raw_content = content;
@@ -360,22 +363,33 @@ impl App {
     fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
         use crossterm::event::{MouseEventKind, MouseButton};
 
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let click_row = mouse.row;
-            let click_col = mouse.column as usize;
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let click_row = mouse.row;
+                let click_col = mouse.column as usize;
 
-            // gutter: "{number} │ " = gutter_width + 1(space) + 1(│) + 1(space) = gutter_width + 3
-            let gutter_total = self.gutter_width + 3;
-            if click_col < gutter_total {
-                return;
-            }
-            let content_col = click_col - gutter_total;
-            let content_line = click_row as usize + self.scroll_offset as usize;
+                // gutter: "{number} │ " = gutter_width + 1(space) + 1(│) + 1(space) = gutter_width + 3
+                let gutter_total = self.gutter_width + 3;
+                if click_col < gutter_total {
+                    return;
+                }
+                let content_col = click_col - gutter_total;
+                let content_line = click_row as usize + self.scroll_offset as usize;
 
-            if let Some(url) = self.find_link_at(content_line, content_col) {
-                self.status_message = format!("Opening: {url}");
-                let _ = open_url(&url);
+                if let Some(url) = self.find_link_at(content_line, content_col) {
+                    self.status_message = format!("Opening: {url}");
+                    let _ = open_url(&url);
+                }
             }
+            MouseEventKind::Moved => {
+                let content_line = mouse.row as usize + self.scroll_offset as usize;
+                if content_line < self.total_lines {
+                    self.hover_line = Some(content_line);
+                } else {
+                    self.hover_line = None;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -457,6 +471,10 @@ impl App {
 
     pub fn search_matches(&self) -> &[usize] {
         &self.search_matches
+    }
+
+    pub fn hover_line(&self) -> Option<usize> {
+        self.hover_line
     }
 }
 

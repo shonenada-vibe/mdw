@@ -303,6 +303,7 @@ pub struct ThemeConfig {
     pub mermaid_edge_label: ThemeColor,
     pub search_match_fg: ThemeColor,
     pub search_match_bg: ThemeColor,
+    pub hover_bg: ThemeColor,
 }
 
 impl Default for ThemeConfig {
@@ -338,6 +339,7 @@ impl Default for ThemeConfig {
             mermaid_edge_label: ThemeColor(Color::Yellow),
             search_match_fg: ThemeColor(Color::Black),
             search_match_bg: ThemeColor(Color::Yellow),
+            hover_bg: ThemeColor(Color::Rgb(80, 80, 100)),
         }
     }
 }

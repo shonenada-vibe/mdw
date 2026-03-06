@@ -29,6 +29,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let search_query = app.search_query();
     let has_search = !search_query.is_empty() && !app.search_matches().is_empty();
+    let hover_line = app.hover_line();
+    let hover_bg = theme.hover_bg.0;
 
     let numbered_lines: Vec<Line<'static>> = app
         .rendered_content()
@@ -36,12 +38,33 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .iter()
         .enumerate()
         .map(|(i, line)| {
+            let is_hovered = hover_line == Some(i);
+            let ln_style = if is_hovered {
+                lineno_style.bg(hover_bg)
+            } else {
+                lineno_style
+            };
+            let sp_style = if is_hovered {
+                sep_style.bg(hover_bg)
+            } else {
+                sep_style
+            };
             let mut spans = vec![
-                Span::styled(format!("{:>width$} ", i + 1, width = gutter_width), lineno_style),
-                Span::styled("│ ", sep_style),
+                Span::styled(format!("{:>width$} ", i + 1, width = gutter_width), ln_style),
+                Span::styled("│ ", sp_style),
             ];
             if has_search && app.search_matches().contains(&i) {
-                spans.extend(highlight_search_spans(&line.spans, search_query, theme));
+                let mut search_spans = highlight_search_spans(&line.spans, search_query, theme);
+                if is_hovered {
+                    for s in &mut search_spans {
+                        s.style = s.style.bg(hover_bg);
+                    }
+                }
+                spans.extend(search_spans);
+            } else if is_hovered {
+                spans.extend(line.spans.iter().map(|s| {
+                    Span::styled(s.content.clone(), s.style.bg(hover_bg))
+                }));
             } else {
                 spans.extend(line.spans.iter().cloned());
             }
