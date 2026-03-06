@@ -179,10 +179,6 @@ impl MarkdownWriter {
         }
     }
 
-    fn push_blank_line(&mut self) {
-        self.lines.push(Line::from(""));
-    }
-
     fn list_prefix(&self) -> String {
         if self.list_stack.is_empty() {
             return String::new();
@@ -225,12 +221,10 @@ impl MarkdownWriter {
             }
             Event::Rule => {
                 self.flush_line();
-                self.push_blank_line();
                 self.lines.push(Line::from(Span::styled(
                     "─".repeat(80),
                     Style::default().fg(self.theme.horizontal_rule.0),
                 )));
-                self.push_blank_line();
             }
             Event::TaskListMarker(checked) => {
                 let marker = if checked { "[x] " } else { "[ ] " };
@@ -245,7 +239,6 @@ impl MarkdownWriter {
         match tag {
             Tag::Heading { level, .. } => {
                 self.flush_line();
-                self.push_blank_line();
                 let (color, prefix) = match level {
                     HeadingLevel::H1 => (self.theme.heading1.0, "# "),
                     HeadingLevel::H2 => (self.theme.heading2.0, "## "),
@@ -278,7 +271,6 @@ impl MarkdownWriter {
             }
             Tag::CodeBlock(_) => {
                 self.flush_line();
-                self.push_blank_line();
                 self.in_code_block = true;
                 self.code_block_lines.clear();
             }
@@ -314,7 +306,6 @@ impl MarkdownWriter {
             }
             Tag::Table(_) => {
                 self.flush_line();
-                self.push_blank_line();
             }
             Tag::TableHead => {}
             Tag::TableRow => {
@@ -332,19 +323,14 @@ impl MarkdownWriter {
             TagEnd::Heading(_) => {
                 self.style_stack.pop();
                 self.flush_line();
-                self.push_blank_line();
             }
             TagEnd::Paragraph => {
                 self.flush_line();
-                if self.list_stack.is_empty() {
-                    self.push_blank_line();
-                }
             }
             TagEnd::BlockQuote(_) => {
                 self.in_blockquote = false;
                 self.style_stack.pop();
                 self.flush_line();
-                self.push_blank_line();
             }
             TagEnd::CodeBlock => {
                 let code_style = Style::default()
@@ -360,7 +346,6 @@ impl MarkdownWriter {
                     }
                 }
                 self.in_code_block = false;
-                self.push_blank_line();
             }
             TagEnd::List(_) => {
                 // Increment ordered list counter if applicable
@@ -369,9 +354,6 @@ impl MarkdownWriter {
                 }
                 self.list_stack.pop();
                 self.flush_line();
-                if self.list_stack.is_empty() {
-                    self.push_blank_line();
-                }
             }
             TagEnd::Item => {
                 self.flush_line();
@@ -400,7 +382,6 @@ impl MarkdownWriter {
             }
             TagEnd::Table => {
                 self.flush_line();
-                self.push_blank_line();
             }
             TagEnd::TableHead => {
                 self.flush_line();
