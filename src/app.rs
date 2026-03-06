@@ -9,6 +9,7 @@ use crate::config::{Action, Config};
 use crate::d2;
 use crate::event::{AppEvent, EventHandler};
 use crate::markdown;
+use crate::markdown::LinkInfo;
 use crate::mermaid;
 use crate::ui;
 use crate::watcher;
@@ -33,6 +34,8 @@ pub struct App {
     search_query: String,
     search_matches: Vec<usize>,
     current_match: Option<usize>,
+    link_infos: Vec<LinkInfo>,
+    gutter_width: usize,
 }
 
 impl App {
@@ -63,6 +66,8 @@ impl App {
             search_query: String::new(),
             search_matches: Vec::new(),
             current_match: None,
+            link_infos: Vec::new(),
+            gutter_width: 0,
         };
 
         app.reload_file()?;
@@ -90,6 +95,8 @@ impl App {
             search_query: String::new(),
             search_matches: Vec::new(),
             current_match: None,
+            link_infos: Vec::new(),
+            gutter_width: 0,
         };
 
         app.raw_content = content;
@@ -98,6 +105,8 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
+        crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
+
         let (event_handler, tx) = EventHandler::new(Duration::from_millis(250));
 
         let _watcher = if self.is_stdin {
@@ -113,6 +122,7 @@ impl App {
 
             match event_handler.next()? {
                 AppEvent::Key(key) => self.handle_key(key),
+                AppEvent::Mouse(mouse) => self.handle_mouse(mouse),
                 AppEvent::FileChanged => {
                     if !self.is_stdin {
                         if let Err(e) = self.reload_file() {
@@ -129,6 +139,7 @@ impl App {
             }
         }
 
+        crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture)?;
         Ok(())
     }
 
@@ -140,19 +151,24 @@ impl App {
     }
 
     fn render_content(&mut self) {
-        self.rendered_content = if self.is_markdown {
-            markdown::render_markdown(&self.raw_content, &self.config.theme)
+        self.link_infos.clear();
+
+        if self.is_markdown {
+            let (text, links) = markdown::render_markdown(&self.raw_content, &self.config.theme);
+            self.rendered_content = text;
+            self.link_infos = links;
         } else if self.is_json {
-            markdown::render_json(&self.raw_content, &self.config.theme)
+            self.rendered_content = markdown::render_json(&self.raw_content, &self.config.theme);
         } else if self.is_mermaid {
-            mermaid::render_mermaid(&self.raw_content, &self.config.theme)
+            self.rendered_content = mermaid::render_mermaid(&self.raw_content, &self.config.theme);
         } else if self.is_d2 {
-            d2::render_d2(&self.raw_content, &self.config.theme)
+            self.rendered_content = d2::render_d2(&self.raw_content, &self.config.theme);
         } else {
-            markdown::render_plain(&self.raw_content)
-        };
+            self.rendered_content = markdown::render_plain(&self.raw_content);
+        }
 
         self.total_lines = self.rendered_content.lines.len();
+        self.gutter_width = if self.total_lines == 0 { 1 } else { self.total_lines.ilog10() as usize + 1 };
         self.clamp_scroll();
     }
 
@@ -341,6 +357,37 @@ impl App {
         }
     }
 
+    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseEventKind, MouseButton};
+
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let click_row = mouse.row;
+            let click_col = mouse.column as usize;
+
+            // gutter: "{number} │ " = gutter_width + 1(space) + 1(│) + 1(space) = gutter_width + 3
+            let gutter_total = self.gutter_width + 3;
+            if click_col < gutter_total {
+                return;
+            }
+            let content_col = click_col - gutter_total;
+            let content_line = click_row as usize + self.scroll_offset as usize;
+
+            if let Some(url) = self.find_link_at(content_line, content_col) {
+                self.status_message = format!("Opening: {url}");
+                let _ = open_url(&url);
+            }
+        }
+    }
+
+    fn find_link_at(&self, line: usize, col: usize) -> Option<String> {
+        for info in &self.link_infos {
+            if info.line == line && col >= info.col_start && col < info.col_end {
+                return Some(info.url.clone());
+            }
+        }
+        None
+    }
+
     fn scroll_down(&mut self, lines: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(lines as u16);
         self.clamp_scroll();
@@ -411,5 +458,20 @@ impl App {
     pub fn search_matches(&self) -> &[usize] {
         &self.search_matches
     }
+}
 
+fn open_url(url: &str) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).spawn()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd").args(["/C", "start", url]).spawn()?;
+    }
+    Ok(())
 }

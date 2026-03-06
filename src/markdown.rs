@@ -4,6 +4,14 @@ use ratatui::text::{Line, Span, Text};
 
 use crate::config::ThemeConfig;
 
+#[derive(Debug, Clone)]
+pub struct LinkInfo {
+    pub line: usize,
+    pub col_start: usize,
+    pub col_end: usize,
+    pub url: String,
+}
+
 pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
     let pretty = match serde_json::from_str::<serde_json::Value>(input) {
         Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| input.to_string()),
@@ -118,7 +126,7 @@ pub fn render_plain(input: &str) -> Text<'static> {
     Text::from(lines)
 }
 
-pub fn render_markdown(input: &str, theme: &ThemeConfig) -> Text<'static> {
+pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Text<'static>, Vec<LinkInfo>) {
     let options = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS;
@@ -146,6 +154,8 @@ struct MarkdownWriter {
     code_block_lines: Vec<String>,
     in_blockquote: bool,
     link_url: Option<String>,
+    link_text_start_col: usize,
+    link_infos: Vec<LinkInfo>,
     theme: ThemeConfig,
 }
 
@@ -160,8 +170,14 @@ impl MarkdownWriter {
             code_block_lines: Vec::new(),
             in_blockquote: false,
             link_url: None,
+            link_text_start_col: 0,
+            link_infos: Vec::new(),
             theme,
         }
+    }
+
+    fn current_col(&self) -> usize {
+        self.current_spans.iter().map(|s| s.content.len()).sum()
     }
 
     fn current_style(&self) -> Style {
@@ -303,6 +319,7 @@ impl MarkdownWriter {
             }
             Tag::Link { dest_url, .. } => {
                 self.link_url = Some(dest_url.to_string());
+                self.link_text_start_col = self.current_col();
                 self.style_stack.push(
                     Style::default()
                         .fg(self.theme.link.0)
@@ -388,10 +405,19 @@ impl MarkdownWriter {
             TagEnd::Link => {
                 self.style_stack.pop();
                 if let Some(url) = self.link_url.take() {
+                    let url_display = format!(" ({url})");
                     self.current_spans.push(Span::styled(
-                        format!(" ({url})"),
+                        url_display.clone(),
                         Style::default().fg(self.theme.link_url.0),
                     ));
+                    let col_end = self.current_col();
+                    let line_idx = self.lines.len();
+                    self.link_infos.push(LinkInfo {
+                        line: line_idx,
+                        col_start: self.link_text_start_col,
+                        col_end,
+                        url,
+                    });
                 }
             }
             TagEnd::Table => {
@@ -418,8 +444,8 @@ impl MarkdownWriter {
         }
     }
 
-    fn finish(mut self) -> Text<'static> {
+    fn finish(mut self) -> (Text<'static>, Vec<LinkInfo>) {
         self.flush_line();
-        Text::from(self.lines)
+        (Text::from(self.lines), self.link_infos)
     }
 }

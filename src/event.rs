@@ -2,11 +2,12 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use crossterm::event::{self, Event as CrosstermEvent, KeyEventKind};
+use crossterm::event::{self, Event as CrosstermEvent, KeyEventKind, MouseEvent};
 
 #[derive(Debug)]
 pub enum AppEvent {
     Key(crossterm::event::KeyEvent),
+    Mouse(MouseEvent),
     FileChanged,
     Tick,
     Resize,
@@ -29,6 +30,9 @@ impl EventHandler {
                         if key.kind == KeyEventKind::Press {
                             let _ = tx_input.send(AppEvent::Key(key));
                         }
+                    }
+                    Ok(CrosstermEvent::Mouse(mouse)) => {
+                        let _ = tx_input.send(AppEvent::Mouse(mouse));
                     }
                     Ok(CrosstermEvent::Resize(_, _)) => {
                         let _ = tx_input.send(AppEvent::Resize);
