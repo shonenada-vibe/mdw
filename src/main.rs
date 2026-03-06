@@ -1,7 +1,9 @@
 mod app;
 mod config;
+mod content;
 mod d2;
 mod event;
+mod image_loader;
 mod markdown;
 mod mermaid;
 mod ui;
@@ -61,7 +63,8 @@ fn main() -> anyhow::Result<()> {
         io::stdin().read_to_string(&mut content)?;
 
         let mut terminal = ratatui::init();
-        let result = app::App::from_stdin(content, config)?.run(&mut terminal);
+        let picker = init_picker();
+        let result = app::App::from_stdin(content, config, picker)?.run(&mut terminal);
         ratatui::restore();
         result
     } else {
@@ -70,10 +73,17 @@ fn main() -> anyhow::Result<()> {
         }
 
         let mut terminal = ratatui::init();
-        let result = app::App::new(file, config)?.run(&mut terminal);
+        let picker = init_picker();
+        let result = app::App::new(file, config, picker)?.run(&mut terminal);
         ratatui::restore();
         result
     }
+}
+
+fn init_picker() -> Option<ratatui_image::picker::Picker> {
+    ratatui_image::picker::Picker::from_query_stdio()
+        .ok()
+        .or_else(|| Some(ratatui_image::picker::Picker::halfblocks()))
 }
 
 fn run_config_setup() -> anyhow::Result<()> {

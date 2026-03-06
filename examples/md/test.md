@@ -38,3 +38,5 @@ Some text after the horizontal rule.
 ~~Strikethrough text~~ and normal text.
 
 That's all folks!
+
+![image](../../assets/screenshot.jpg)

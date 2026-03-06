@@ -3,11 +3,13 @@ use std::time::Duration;
 
 use anyhow::Context;
 use ratatui::DefaultTerminal;
-use ratatui::text::Text;
+use ratatui_image::picker::Picker;
 
 use crate::config::{Action, Config};
+use crate::content::ContentBlock;
 use crate::d2;
 use crate::event::{AppEvent, EventHandler};
+use crate::image_loader;
 use crate::markdown;
 use crate::markdown::LinkInfo;
 use crate::mermaid;
@@ -22,7 +24,7 @@ pub struct App {
     is_mermaid: bool,
     is_d2: bool,
     raw_content: String,
-    rendered_content: Text<'static>,
+    content_blocks: Vec<ContentBlock>,
     total_lines: usize,
     scroll_offset: u16,
     viewport_height: u16,
@@ -37,15 +39,22 @@ pub struct App {
     link_infos: Vec<LinkInfo>,
     gutter_width: usize,
     hover_line: Option<usize>,
+    picker: Option<Picker>,
+    base_dir: PathBuf,
 }
 
 impl App {
-    pub fn new(file_path: PathBuf, config: Config) -> anyhow::Result<Self> {
+    pub fn new(file_path: PathBuf, config: Config, picker: Option<Picker>) -> anyhow::Result<Self> {
         let ext = file_path.extension().and_then(|e| e.to_str());
         let is_markdown = ext.is_some_and(|e| matches!(e, "md" | "markdown" | "mdx"));
         let is_json = ext.is_some_and(|e| e == "json");
         let is_mermaid = ext.is_some_and(|e| e == "mermaid");
         let is_d2 = ext.is_some_and(|e| e == "d2");
+
+        let base_dir = file_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
 
         let mut app = App {
             file_path,
@@ -55,7 +64,7 @@ impl App {
             is_mermaid,
             is_d2,
             raw_content: String::new(),
-            rendered_content: Text::default(),
+            content_blocks: Vec::new(),
             total_lines: 0,
             scroll_offset: 0,
             viewport_height: 0,
@@ -70,13 +79,15 @@ impl App {
             link_infos: Vec::new(),
             gutter_width: 0,
             hover_line: None,
+            picker,
+            base_dir,
         };
 
         app.reload_file()?;
         Ok(app)
     }
 
-    pub fn from_stdin(content: String, config: Config) -> anyhow::Result<Self> {
+    pub fn from_stdin(content: String, config: Config, picker: Option<Picker>) -> anyhow::Result<Self> {
         let mut app = App {
             file_path: PathBuf::from("stdin"),
             is_stdin: true,
@@ -85,7 +96,7 @@ impl App {
             is_mermaid: false,
             is_d2: false,
             raw_content: String::new(),
-            rendered_content: Text::default(),
+            content_blocks: Vec::new(),
             total_lines: 0,
             scroll_offset: 0,
             viewport_height: 0,
@@ -100,6 +111,8 @@ impl App {
             link_infos: Vec::new(),
             gutter_width: 0,
             hover_line: None,
+            picker,
+            base_dir: PathBuf::from("."),
         };
 
         app.raw_content = content;
@@ -136,7 +149,7 @@ impl App {
                     }
                 }
                 AppEvent::Resize => {
-                    // viewport_height is updated in ui::render via set_viewport_height
+                    self.recompute_image_heights();
                 }
                 AppEvent::Tick => {}
             }
@@ -155,24 +168,83 @@ impl App {
 
     fn render_content(&mut self) {
         self.link_infos.clear();
+        self.content_blocks.clear();
 
         if self.is_markdown {
-            let (text, links) = markdown::render_markdown(&self.raw_content, &self.config.theme);
-            self.rendered_content = text;
+            let (blocks, links) = markdown::render_markdown(&self.raw_content, &self.config.theme);
+            self.content_blocks = blocks;
             self.link_infos = links;
-        } else if self.is_json {
-            self.rendered_content = markdown::render_json(&self.raw_content, &self.config.theme);
-        } else if self.is_mermaid {
-            self.rendered_content = mermaid::render_mermaid(&self.raw_content, &self.config.theme);
-        } else if self.is_d2 {
-            self.rendered_content = d2::render_d2(&self.raw_content, &self.config.theme);
+            self.load_images();
         } else {
-            self.rendered_content = markdown::render_plain(&self.raw_content);
+            let text = if self.is_json {
+                markdown::render_json(&self.raw_content, &self.config.theme)
+            } else if self.is_mermaid {
+                mermaid::render_mermaid(&self.raw_content, &self.config.theme)
+            } else if self.is_d2 {
+                d2::render_d2(&self.raw_content, &self.config.theme)
+            } else {
+                markdown::render_plain(&self.raw_content)
+            };
+            self.content_blocks = vec![ContentBlock::Text { lines: text.lines.into_iter().collect() }];
         }
 
-        self.total_lines = self.rendered_content.lines.len();
-        self.gutter_width = if self.total_lines == 0 { 1 } else { self.total_lines.ilog10() as usize + 1 };
+        self.compute_total_lines();
         self.clamp_scroll();
+    }
+
+    fn load_images(&mut self) {
+        for block in &mut self.content_blocks {
+            if let ContentBlock::Image { source, protocol, error, display_height, .. } = block {
+                match image_loader::load_image(source, &self.base_dir) {
+                    Ok(img) => {
+                        if let Some(ref mut picker) = self.picker {
+                            let font_size = picker.font_size();
+                            // Use a reasonable default width; will be recomputed on first render
+                            let cols = 80u16;
+                            *display_height = image_loader::compute_display_height(&img, cols, font_size);
+                            *protocol = Some(picker.new_resize_protocol(img));
+                        } else {
+                            *error = Some("No image protocol available".to_string());
+                            *display_height = 1;
+                        }
+                    }
+                    Err(e) => {
+                        *error = Some(e);
+                        *display_height = 1;
+                    }
+                }
+            }
+        }
+    }
+
+    fn recompute_image_heights(&mut self) {
+        let font_size = match &self.picker {
+            Some(p) => p.font_size(),
+            None => return,
+        };
+        // Estimate available content columns (viewport width minus gutter)
+        let cols = 80u16; // Will be updated in render
+        for block in &mut self.content_blocks {
+            if let ContentBlock::Image { source, display_height, protocol, .. } = block
+                && protocol.is_some()
+                && let Ok(img) = image_loader::load_image(source, &self.base_dir)
+            {
+                *display_height = image_loader::compute_display_height(&img, cols, font_size);
+            }
+        }
+        self.compute_total_lines();
+        self.clamp_scroll();
+    }
+
+    fn compute_total_lines(&mut self) {
+        self.total_lines = 0;
+        for block in &self.content_blocks {
+            match block {
+                ContentBlock::Text { lines } => self.total_lines += lines.len(),
+                ContentBlock::Image { display_height, .. } => self.total_lines += *display_height as usize,
+            }
+        }
+        self.gutter_width = if self.total_lines == 0 { 1 } else { self.total_lines.ilog10() as usize + 1 };
     }
 
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
@@ -289,10 +361,22 @@ impl App {
         }
 
         let query_lower = self.search_query.to_lowercase();
-        for (i, line) in self.rendered_content.lines.iter().enumerate() {
-            let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-            if line_text.to_lowercase().contains(&query_lower) {
-                self.search_matches.push(i);
+        let mut row_offset = 0usize;
+
+        for block in &self.content_blocks {
+            match block {
+                ContentBlock::Text { lines } => {
+                    for (i, line) in lines.iter().enumerate() {
+                        let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                        if line_text.to_lowercase().contains(&query_lower) {
+                            self.search_matches.push(row_offset + i);
+                        }
+                    }
+                    row_offset += lines.len();
+                }
+                ContentBlock::Image { display_height, .. } => {
+                    row_offset += *display_height as usize;
+                }
             }
         }
 
@@ -368,7 +452,6 @@ impl App {
                 let click_row = mouse.row;
                 let click_col = mouse.column as usize;
 
-                // gutter: "{number} │ " = gutter_width + 1(space) + 1(│) + 1(space) = gutter_width + 3
                 let gutter_total = self.gutter_width + 3;
                 if click_col < gutter_total {
                     return;
@@ -420,17 +503,17 @@ impl App {
     }
 
     fn clamp_scroll(&mut self) {
-        let max_scroll = if self.total_lines as u16 > self.viewport_height {
-            self.total_lines as u16 - self.viewport_height
-        } else {
-            0
-        };
+        let max_scroll = (self.total_lines as u16).saturating_sub(self.viewport_height);
         self.scroll_offset = self.scroll_offset.min(max_scroll);
     }
 
     // Accessors for ui.rs
-    pub fn rendered_content(&self) -> &Text<'static> {
-        &self.rendered_content
+    pub fn content_blocks(&self) -> &[ContentBlock] {
+        &self.content_blocks
+    }
+
+    pub fn content_blocks_mut(&mut self) -> &mut [ContentBlock] {
+        &mut self.content_blocks
     }
 
     pub fn scroll_offset(&self) -> u16 {
@@ -475,6 +558,10 @@ impl App {
 
     pub fn hover_line(&self) -> Option<usize> {
         self.hover_line
+    }
+
+    pub fn gutter_width(&self) -> usize {
+        self.gutter_width
     }
 }
 

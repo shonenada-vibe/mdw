@@ -1,8 +1,11 @@
+use std::path::PathBuf;
+
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 
 use crate::config::ThemeConfig;
+use crate::content::{ContentBlock, ImageSource};
 
 #[derive(Debug, Clone)]
 pub struct LinkInfo {
@@ -40,12 +43,11 @@ pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
             while let Some(&(i, ch)) = chars.peek() {
                 match ch {
                     '"' => {
-                        // Find the end of the string (handling escapes)
                         let mut end = i + 1;
                         let bytes = trimmed.as_bytes();
                         while end < bytes.len() {
                             if bytes[end] == b'\\' {
-                                end += 2; // skip escaped char
+                                end += 2;
                             } else if bytes[end] == b'"' {
                                 end += 1;
                                 break;
@@ -55,7 +57,6 @@ pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
                         }
                         let s = &trimmed[i..end];
 
-                        // Check if this string is a key (followed by ':')
                         let rest = trimmed[end..].trim_start();
                         let style = if rest.starts_with(':') {
                             key_style
@@ -64,7 +65,6 @@ pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
                         };
 
                         spans.push(Span::styled(s.to_string(), style));
-                        // Advance the iterator past the string
                         while chars.peek().is_some_and(|&(j, _)| j < end) {
                             chars.next();
                         }
@@ -74,7 +74,6 @@ pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
                         chars.next();
                     }
                     _ if ch.is_ascii_digit() || ch == '-' => {
-                        // Number
                         let start = i;
                         chars.next();
                         while chars
@@ -85,7 +84,6 @@ pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
                         }
                         let end = chars.peek().map_or(trimmed.len(), |&(j, _)| j);
                         let token = &trimmed[start..end];
-                        // Verify it's actually a number (not just a '-' before something else)
                         if token.parse::<f64>().is_ok() {
                             spans.push(Span::styled(token.to_string(), number_style));
                         } else {
@@ -126,7 +124,7 @@ pub fn render_plain(input: &str) -> Text<'static> {
     Text::from(lines)
 }
 
-pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Text<'static>, Vec<LinkInfo>) {
+pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, Vec<LinkInfo>) {
     let options = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS;
@@ -157,6 +155,12 @@ struct MarkdownWriter {
     link_text_start_col: usize,
     link_infos: Vec<LinkInfo>,
     theme: ThemeConfig,
+    // Image support
+    blocks: Vec<ContentBlock>,
+    block_start_row: usize,
+    in_image: bool,
+    image_url: Option<String>,
+    image_alt_parts: Vec<String>,
 }
 
 impl MarkdownWriter {
@@ -173,6 +177,11 @@ impl MarkdownWriter {
             link_text_start_col: 0,
             link_infos: Vec::new(),
             theme,
+            blocks: Vec::new(),
+            block_start_row: 0,
+            in_image: false,
+            image_url: None,
+            image_alt_parts: Vec::new(),
         }
     }
 
@@ -199,6 +208,16 @@ impl MarkdownWriter {
         self.lines.push(Line::from(""));
     }
 
+    fn flush_text_block(&mut self) {
+        self.flush_line();
+        if !self.lines.is_empty() {
+            let lines: Vec<Line<'static>> = self.lines.drain(..).collect();
+            let line_count = lines.len();
+            self.blocks.push(ContentBlock::Text { lines });
+            self.block_start_row += line_count;
+        }
+    }
+
     fn list_prefix(&self) -> String {
         if self.list_stack.is_empty() {
             return String::new();
@@ -216,7 +235,9 @@ impl MarkdownWriter {
             Event::Start(tag) => self.handle_start(tag),
             Event::End(tag) => self.handle_end(tag),
             Event::Text(text) => {
-                if self.in_code_block {
+                if self.in_image {
+                    self.image_alt_parts.push(text.to_string());
+                } else if self.in_code_block {
                     self.code_block_lines.push(text.to_string());
                 } else {
                     let style = self.current_style();
@@ -224,20 +245,28 @@ impl MarkdownWriter {
                 }
             }
             Event::Code(code) => {
-                let style = Style::default()
-                    .fg(self.theme.inline_code_fg.0)
-                    .bg(self.theme.inline_code_bg.0);
-                self.current_spans.push(Span::styled(
-                    format!(" {code} "),
-                    style,
-                ));
+                if self.in_image {
+                    self.image_alt_parts.push(code.to_string());
+                } else {
+                    let style = Style::default()
+                        .fg(self.theme.inline_code_fg.0)
+                        .bg(self.theme.inline_code_bg.0);
+                    self.current_spans.push(Span::styled(
+                        format!(" {code} "),
+                        style,
+                    ));
+                }
             }
             Event::SoftBreak => {
-                let style = self.current_style();
-                self.current_spans.push(Span::styled(" ", style));
+                if !self.in_image {
+                    let style = self.current_style();
+                    self.current_spans.push(Span::styled(" ", style));
+                }
             }
             Event::HardBreak => {
-                self.flush_line();
+                if !self.in_image {
+                    self.flush_line();
+                }
             }
             Event::Rule => {
                 self.flush_line();
@@ -275,7 +304,6 @@ impl MarkdownWriter {
                 self.current_spans.push(Span::styled(prefix.to_string(), style));
             }
             Tag::Paragraph => {
-                // If we're inside a list item, don't add blank line
                 if self.list_stack.is_empty() {
                     self.flush_line();
                 }
@@ -326,6 +354,12 @@ impl MarkdownWriter {
                         .add_modifier(Modifier::UNDERLINED),
                 );
             }
+            Tag::Image { dest_url, .. } => {
+                self.flush_text_block();
+                self.in_image = true;
+                self.image_url = Some(dest_url.to_string());
+                self.image_alt_parts.clear();
+            }
             Tag::Table(_) => {
                 self.flush_line();
             }
@@ -364,7 +398,6 @@ impl MarkdownWriter {
                     .fg(self.theme.code_block_fg.0)
                     .bg(self.theme.code_block_bg.0);
                 for code_line in self.code_block_lines.drain(..) {
-                    // Split by newlines within the code text
                     for line in code_line.split('\n') {
                         self.lines.push(Line::from(Span::styled(
                             format!("  {line}"),
@@ -376,9 +409,7 @@ impl MarkdownWriter {
                 self.push_blank_line();
             }
             TagEnd::List(_) => {
-                // Increment ordered list counter if applicable
                 if let Some(ListKind::Ordered(_)) = self.list_stack.last() {
-                    // counter is incremented per-item in Item end
                 }
                 self.list_stack.pop();
                 self.flush_line();
@@ -388,7 +419,6 @@ impl MarkdownWriter {
             }
             TagEnd::Item => {
                 self.flush_line();
-                // Increment ordered list counter
                 if let Some(ListKind::Ordered(n)) = self.list_stack.last_mut() {
                     *n += 1;
                 }
@@ -411,7 +441,7 @@ impl MarkdownWriter {
                         Style::default().fg(self.theme.link_url.0),
                     ));
                     let col_end = self.current_col();
-                    let line_idx = self.lines.len();
+                    let line_idx = self.block_start_row + self.lines.len();
                     self.link_infos.push(LinkInfo {
                         line: line_idx,
                         col_start: self.link_text_start_col,
@@ -419,6 +449,26 @@ impl MarkdownWriter {
                         url,
                     });
                 }
+            }
+            TagEnd::Image => {
+                self.in_image = false;
+                let alt_text = self.image_alt_parts.drain(..).collect::<String>();
+                let url = self.image_url.take().unwrap_or_default();
+
+                let source = if url.starts_with("https://") || url.starts_with("http://") {
+                    ImageSource::Remote(url)
+                } else {
+                    ImageSource::Local(PathBuf::from(url))
+                };
+
+                self.blocks.push(ContentBlock::Image {
+                    alt_text,
+                    display_height: 1, // Will be computed later when terminal size is known
+                    protocol: None,
+                    error: None,
+                    source,
+                });
+                self.block_start_row += 1; // Image takes at least 1 row initially
             }
             TagEnd::Table => {
                 self.flush_line();
@@ -444,8 +494,8 @@ impl MarkdownWriter {
         }
     }
 
-    fn finish(mut self) -> (Text<'static>, Vec<LinkInfo>) {
-        self.flush_line();
-        (Text::from(self.lines), self.link_infos)
+    fn finish(mut self) -> (Vec<ContentBlock>, Vec<LinkInfo>) {
+        self.flush_text_block();
+        (self.blocks, self.link_infos)
     }
 }
