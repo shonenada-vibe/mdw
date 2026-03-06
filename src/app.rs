@@ -29,6 +29,10 @@ pub struct App {
     show_help: bool,
     status_message: String,
     config: Config,
+    search_mode: bool,
+    search_query: String,
+    search_matches: Vec<usize>,
+    current_match: Option<usize>,
 }
 
 impl App {
@@ -55,6 +59,10 @@ impl App {
             show_help: false,
             status_message: String::new(),
             config,
+            search_mode: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            current_match: None,
         };
 
         app.reload_file()?;
@@ -78,6 +86,10 @@ impl App {
             show_help: false,
             status_message: String::new(),
             config,
+            search_mode: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            current_match: None,
         };
 
         app.raw_content = content;
@@ -145,6 +157,45 @@ impl App {
     }
 
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        if self.search_mode {
+            match key.code {
+                KeyCode::Esc => {
+                    self.search_mode = false;
+                    self.search_query.clear();
+                    self.search_matches.clear();
+                    self.current_match = None;
+                    self.status_message.clear();
+                }
+                KeyCode::Enter => {
+                    self.search_mode = false;
+                    if !self.search_query.is_empty() {
+                        self.execute_search();
+                        if self.search_matches.is_empty() {
+                            self.status_message = format!("Pattern not found: {}", self.search_query);
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                        self.search_mode = false;
+                        self.search_query.clear();
+                        self.search_matches.clear();
+                        self.current_match = None;
+                        self.status_message.clear();
+                    } else {
+                        self.search_query.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
         let Some(action) = self.config.keybindings.resolve_action(&key) else {
             if self.show_help {
                 self.show_help = false;
@@ -194,6 +245,99 @@ impl App {
             Action::ToggleHelp => {
                 self.show_help = true;
             }
+            Action::SearchForward => {
+                self.search_mode = true;
+                self.search_query.clear();
+                self.search_matches.clear();
+                self.current_match = None;
+                self.status_message.clear();
+            }
+            Action::SearchNext => {
+                self.jump_to_next_match();
+            }
+            Action::SearchPrev => {
+                self.jump_to_prev_match();
+            }
+        }
+    }
+
+    fn execute_search(&mut self) {
+        self.search_matches.clear();
+        self.current_match = None;
+
+        if self.search_query.is_empty() {
+            return;
+        }
+
+        let query_lower = self.search_query.to_lowercase();
+        for (i, line) in self.rendered_content.lines.iter().enumerate() {
+            let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            if line_text.to_lowercase().contains(&query_lower) {
+                self.search_matches.push(i);
+            }
+        }
+
+        if !self.search_matches.is_empty() {
+            let current_pos = self.scroll_offset as usize;
+            let idx = self.search_matches
+                .iter()
+                .position(|&line| line >= current_pos)
+                .unwrap_or(0);
+            self.current_match = Some(idx);
+            self.scroll_to_match(idx);
+            self.update_search_status();
+        }
+    }
+
+    fn jump_to_next_match(&mut self) {
+        if self.search_matches.is_empty() {
+            if !self.search_query.is_empty() {
+                self.status_message = format!("Pattern not found: {}", self.search_query);
+            }
+            return;
+        }
+        let idx = match self.current_match {
+            Some(i) => (i + 1) % self.search_matches.len(),
+            None => 0,
+        };
+        self.current_match = Some(idx);
+        self.scroll_to_match(idx);
+        self.update_search_status();
+    }
+
+    fn jump_to_prev_match(&mut self) {
+        if self.search_matches.is_empty() {
+            if !self.search_query.is_empty() {
+                self.status_message = format!("Pattern not found: {}", self.search_query);
+            }
+            return;
+        }
+        let idx = match self.current_match {
+            Some(0) => self.search_matches.len() - 1,
+            Some(i) => i - 1,
+            None => self.search_matches.len() - 1,
+        };
+        self.current_match = Some(idx);
+        self.scroll_to_match(idx);
+        self.update_search_status();
+    }
+
+    fn scroll_to_match(&mut self, idx: usize) {
+        let line = self.search_matches[idx] as u16;
+        if line < self.scroll_offset || line >= self.scroll_offset + self.viewport_height {
+            self.scroll_offset = line.saturating_sub(self.viewport_height / 4);
+            self.clamp_scroll();
+        }
+    }
+
+    fn update_search_status(&mut self) {
+        if let Some(idx) = self.current_match {
+            self.status_message = format!(
+                "/{} [{}/{}]",
+                self.search_query,
+                idx + 1,
+                self.search_matches.len()
+            );
         }
     }
 
@@ -255,4 +399,17 @@ impl App {
     pub fn config(&self) -> &Config {
         &self.config
     }
+
+    pub fn search_mode(&self) -> bool {
+        self.search_mode
+    }
+
+    pub fn search_query(&self) -> &str {
+        &self.search_query
+    }
+
+    pub fn search_matches(&self) -> &[usize] {
+        &self.search_matches
+    }
+
 }

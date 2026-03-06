@@ -183,6 +183,9 @@ pub enum Action {
     Top,
     Bottom,
     ToggleHelp,
+    SearchForward,
+    SearchNext,
+    SearchPrev,
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +205,9 @@ pub struct KeybindingsConfig {
     pub top: Vec<KeyCombo>,
     pub bottom: Vec<KeyCombo>,
     pub toggle_help: Vec<KeyCombo>,
+    pub search_forward: Vec<KeyCombo>,
+    pub search_next: Vec<KeyCombo>,
+    pub search_prev: Vec<KeyCombo>,
 }
 
 impl Default for KeybindingsConfig {
@@ -217,6 +223,9 @@ impl Default for KeybindingsConfig {
             top: parse_combos(&["g", "home"]),
             bottom: parse_combos(&["shift+g", "G", "end"]),
             toggle_help: parse_combos(&["?"]),
+            search_forward: parse_combos(&["/"]),
+            search_next: parse_combos(&["n"]),
+            search_prev: parse_combos(&["N", "shift+n"]),
         }
     }
 }
@@ -241,6 +250,9 @@ impl KeybindingsConfig {
             (Action::Top, &self.top),
             (Action::Bottom, &self.bottom),
             (Action::ToggleHelp, &self.toggle_help),
+            (Action::SearchForward, &self.search_forward),
+            (Action::SearchNext, &self.search_next),
+            (Action::SearchPrev, &self.search_prev),
         ];
 
         for (action, combos) in bindings {
@@ -289,6 +301,8 @@ pub struct ThemeConfig {
     pub mermaid_node_text: ThemeColor,
     pub mermaid_edge: ThemeColor,
     pub mermaid_edge_label: ThemeColor,
+    pub search_match_fg: ThemeColor,
+    pub search_match_bg: ThemeColor,
 }
 
 impl Default for ThemeConfig {
@@ -322,6 +336,8 @@ impl Default for ThemeConfig {
             mermaid_node_text: ThemeColor(Color::White),
             mermaid_edge: ThemeColor(Color::DarkGray),
             mermaid_edge_label: ThemeColor(Color::Yellow),
+            search_match_fg: ThemeColor(Color::Black),
+            search_match_bg: ThemeColor(Color::Yellow),
         }
     }
 }
@@ -424,6 +440,9 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # page_up = ["ctrl+b", "pageup"]
 # top = ["g", "home"]
 # bottom = ["shift+g", "G", "end"]
+# search_forward = ["/"]
+# search_next = ["n"]
+# search_prev = ["N", "shift+n"]
 
 # [theme]
 # Colors can be named colors or hex "#rrggbb".

@@ -4,6 +4,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 
+use crate::config::ThemeConfig;
+
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -19,11 +21,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let theme = &app.config().theme;
 
-    // Content with line numbers
+    // Content with line numbers and search highlighting
     let total = app.total_lines();
     let gutter_width = if total == 0 { 1 } else { total.ilog10() as usize + 1 };
     let lineno_style = Style::default().fg(theme.line_number.0);
     let sep_style = Style::default().fg(theme.line_number.0);
+
+    let search_query = app.search_query();
+    let has_search = !search_query.is_empty() && !app.search_matches().is_empty();
 
     let numbered_lines: Vec<Line<'static>> = app
         .rendered_content()
@@ -35,7 +40,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 Span::styled(format!("{:>width$} ", i + 1, width = gutter_width), lineno_style),
                 Span::styled("│ ", sep_style),
             ];
-            spans.extend(line.spans.iter().cloned());
+            if has_search && app.search_matches().contains(&i) {
+                spans.extend(highlight_search_spans(&line.spans, search_query, theme));
+            } else {
+                spans.extend(line.spans.iter().cloned());
+            }
             Line::from(spans)
         })
         .collect();
@@ -58,23 +67,37 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let status_bar_fg = theme.status_bar_fg.0;
     let status_bar_message_fg = theme.status_bar_message_fg.0;
 
-    let scroll_info = format!(
-        " {} | {}/{} ",
-        app.file_path_display(),
-        app.scroll_offset() + 1,
-        app.total_lines(),
-    );
-    let status_bar = Paragraph::new(Line::from(vec![
-        Span::styled(
-            scroll_info,
-            Style::default().bg(status_bar_bg).fg(status_bar_fg),
-        ),
-        Span::styled(
-            format!(" {} ", app.status_message()),
-            Style::default().bg(status_bar_bg).fg(status_bar_message_fg),
-        ),
-    ]))
-    .style(Style::default().bg(status_bar_bg));
+    let status_bar = if app.search_mode() {
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("/{}", app.search_query()),
+                Style::default().bg(status_bar_bg).fg(status_bar_fg),
+            ),
+            Span::styled(
+                "\u{2588}",
+                Style::default().bg(status_bar_bg).fg(status_bar_fg),
+            ),
+        ]))
+        .style(Style::default().bg(status_bar_bg))
+    } else {
+        let scroll_info = format!(
+            " {} | {}/{} ",
+            app.file_path_display(),
+            app.scroll_offset() + 1,
+            app.total_lines(),
+        );
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                scroll_info,
+                Style::default().bg(status_bar_bg).fg(status_bar_fg),
+            ),
+            Span::styled(
+                format!(" {} ", app.status_message()),
+                Style::default().bg(status_bar_bg).fg(status_bar_message_fg),
+            ),
+        ]))
+        .style(Style::default().bg(status_bar_bg))
+    };
 
     frame.render_widget(status_bar, chunks[1]);
 
@@ -140,6 +163,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             ("Go to Top", fmt_keys(&kb.top)),
             ("Go to Bottom", fmt_keys(&kb.bottom)),
             ("Toggle Help", fmt_keys(&kb.toggle_help)),
+            ("Search", fmt_keys(&kb.search_forward)),
+            ("Next Match", fmt_keys(&kb.search_next)),
+            ("Prev Match", fmt_keys(&kb.search_prev)),
         ];
 
         let max_desc = entries.iter().map(|(d, _)| d.len()).max().unwrap_or(0);
@@ -170,4 +196,49 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Clear, help_area);
         frame.render_widget(help_paragraph, help_area);
     }
+}
+
+fn highlight_search_spans<'a>(
+    spans: &[Span<'a>],
+    query: &str,
+    theme: &ThemeConfig,
+) -> Vec<Span<'a>> {
+    let highlight_style = Style::default()
+        .fg(theme.search_match_fg.0)
+        .bg(theme.search_match_bg.0)
+        .add_modifier(Modifier::BOLD);
+    let query_lower = query.to_lowercase();
+    let mut result = Vec::new();
+
+    for span in spans {
+        let text = span.content.as_ref();
+        let text_lower = text.to_lowercase();
+        let mut last = 0;
+
+        for (start, _) in text_lower.match_indices(&query_lower) {
+            let end = start + query.len();
+            if start > last {
+                result.push(Span::styled(
+                    text[last..start].to_string(),
+                    span.style,
+                ));
+            }
+            result.push(Span::styled(
+                text[start..end].to_string(),
+                highlight_style,
+            ));
+            last = end;
+        }
+
+        if last < text.len() {
+            result.push(Span::styled(
+                text[last..].to_string(),
+                span.style,
+            ));
+        } else if last == 0 {
+            result.push(span.clone());
+        }
+    }
+
+    result
 }
