@@ -7,6 +7,7 @@ mod mermaid;
 mod ui;
 mod watcher;
 
+use std::io::{self, Read as _};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -48,19 +49,31 @@ fn main() -> anyhow::Result<()> {
     }
 
     let Some(file) = cli.file else {
-        anyhow::bail!("A file path is required. Usage: mdw <FILE>");
+        anyhow::bail!("A file path is required. Usage: mdw <FILE> or mdw -");
     };
-
-    if !file.exists() {
-        anyhow::bail!("File not found: {}", file.display());
-    }
 
     let config = config::Config::load()?;
 
-    let mut terminal = ratatui::init();
-    let result = app::App::new(file, config)?.run(&mut terminal);
-    ratatui::restore();
-    result
+    let is_stdin = file.as_os_str() == "-";
+
+    if is_stdin {
+        let mut content = String::new();
+        io::stdin().read_to_string(&mut content)?;
+
+        let mut terminal = ratatui::init();
+        let result = app::App::from_stdin(content, config)?.run(&mut terminal);
+        ratatui::restore();
+        result
+    } else {
+        if !file.exists() {
+            anyhow::bail!("File not found: {}", file.display());
+        }
+
+        let mut terminal = ratatui::init();
+        let result = app::App::new(file, config)?.run(&mut terminal);
+        ratatui::restore();
+        result
+    }
 }
 
 fn run_config_setup() -> anyhow::Result<()> {

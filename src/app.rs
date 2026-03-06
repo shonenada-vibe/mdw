@@ -15,6 +15,7 @@ use crate::watcher;
 
 pub struct App {
     file_path: PathBuf,
+    is_stdin: bool,
     is_markdown: bool,
     is_json: bool,
     is_mermaid: bool,
@@ -40,6 +41,7 @@ impl App {
 
         let mut app = App {
             file_path,
+            is_stdin: false,
             is_markdown,
             is_json,
             is_mermaid,
@@ -59,12 +61,40 @@ impl App {
         Ok(app)
     }
 
+    pub fn from_stdin(content: String, config: Config) -> anyhow::Result<Self> {
+        let mut app = App {
+            file_path: PathBuf::from("stdin"),
+            is_stdin: true,
+            is_markdown: true,
+            is_json: false,
+            is_mermaid: false,
+            is_d2: false,
+            raw_content: String::new(),
+            rendered_content: Text::default(),
+            total_lines: 0,
+            scroll_offset: 0,
+            viewport_height: 0,
+            should_quit: false,
+            show_help: false,
+            status_message: String::new(),
+            config,
+        };
+
+        app.raw_content = content;
+        app.render_content();
+        Ok(app)
+    }
+
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         let (event_handler, tx) = EventHandler::new(Duration::from_millis(250));
 
-        let canonical = self.file_path.canonicalize()
-            .with_context(|| format!("Failed to canonicalize path: {}", self.file_path.display()))?;
-        let _watcher = watcher::setup_watcher(&canonical, tx, self.config.behavior.debounce_ms)?;
+        let _watcher = if self.is_stdin {
+            None
+        } else {
+            let canonical = self.file_path.canonicalize()
+                .with_context(|| format!("Failed to canonicalize path: {}", self.file_path.display()))?;
+            Some(watcher::setup_watcher(&canonical, tx, self.config.behavior.debounce_ms)?)
+        };
 
         while !self.should_quit {
             terminal.draw(|frame| ui::render(frame, self))?;
@@ -72,10 +102,12 @@ impl App {
             match event_handler.next()? {
                 AppEvent::Key(key) => self.handle_key(key),
                 AppEvent::FileChanged => {
-                    if let Err(e) = self.reload_file() {
-                        self.status_message = format!("Error: {e}");
-                    } else {
-                        self.status_message = "Reloaded".to_string();
+                    if !self.is_stdin {
+                        if let Err(e) = self.reload_file() {
+                            self.status_message = format!("Error: {e}");
+                        } else {
+                            self.status_message = "Reloaded".to_string();
+                        }
                     }
                 }
                 AppEvent::Resize => {
@@ -91,7 +123,11 @@ impl App {
     fn reload_file(&mut self) -> anyhow::Result<()> {
         self.raw_content = std::fs::read_to_string(&self.file_path)
             .with_context(|| format!("Failed to read {}", self.file_path.display()))?;
+        self.render_content();
+        Ok(())
+    }
 
+    fn render_content(&mut self) {
         self.rendered_content = if self.is_markdown {
             markdown::render_markdown(&self.raw_content, &self.config.theme)
         } else if self.is_json {
@@ -106,7 +142,6 @@ impl App {
 
         self.total_lines = self.rendered_content.lines.len();
         self.clamp_scroll();
-        Ok(())
     }
 
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
