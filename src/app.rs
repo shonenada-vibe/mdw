@@ -8,6 +8,7 @@ use ratatui::text::Text;
 use crate::config::{Action, Config};
 use crate::event::{AppEvent, EventHandler};
 use crate::markdown;
+use crate::mermaid;
 use crate::ui;
 use crate::watcher;
 
@@ -15,12 +16,14 @@ pub struct App {
     file_path: PathBuf,
     is_markdown: bool,
     is_json: bool,
+    is_mermaid: bool,
     raw_content: String,
     rendered_content: Text<'static>,
     total_lines: usize,
     scroll_offset: u16,
     viewport_height: u16,
     should_quit: bool,
+    show_help: bool,
     status_message: String,
     config: Config,
 }
@@ -30,17 +33,20 @@ impl App {
         let ext = file_path.extension().and_then(|e| e.to_str());
         let is_markdown = ext.is_some_and(|e| matches!(e, "md" | "markdown" | "mdx"));
         let is_json = ext.is_some_and(|e| e == "json");
+        let is_mermaid = ext.is_some_and(|e| e == "mermaid");
 
         let mut app = App {
             file_path,
             is_markdown,
             is_json,
+            is_mermaid,
             raw_content: String::new(),
             rendered_content: Text::default(),
             total_lines: 0,
             scroll_offset: 0,
             viewport_height: 0,
             should_quit: false,
+            show_help: false,
             status_message: String::new(),
             config,
         };
@@ -86,6 +92,8 @@ impl App {
             markdown::render_markdown(&self.raw_content, &self.config.theme)
         } else if self.is_json {
             markdown::render_json(&self.raw_content, &self.config.theme)
+        } else if self.is_mermaid {
+            mermaid::render_mermaid(&self.raw_content, &self.config.theme)
         } else {
             markdown::render_plain(&self.raw_content)
         };
@@ -97,8 +105,24 @@ impl App {
 
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
         let Some(action) = self.config.keybindings.resolve_action(&key) else {
+            if self.show_help {
+                self.show_help = false;
+            }
             return;
         };
+
+        if self.show_help {
+            match action {
+                Action::ToggleHelp | Action::Quit => {
+                    self.show_help = false;
+                    return;
+                }
+                _ => {
+                    self.show_help = false;
+                    return;
+                }
+            }
+        }
 
         let scroll_speed = self.config.behavior.scroll_speed;
 
@@ -125,6 +149,9 @@ impl App {
             }
             Action::Bottom => {
                 self.scroll_to_bottom();
+            }
+            Action::ToggleHelp => {
+                self.show_help = true;
             }
         }
     }
@@ -178,6 +205,10 @@ impl App {
 
     pub fn set_viewport_height(&mut self, height: u16) {
         self.viewport_height = height;
+    }
+
+    pub fn show_help(&self) -> bool {
+        self.show_help
     }
 
     pub fn config(&self) -> &Config {

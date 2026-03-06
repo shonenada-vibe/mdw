@@ -182,6 +182,7 @@ pub enum Action {
     PageUp,
     Top,
     Bottom,
+    ToggleHelp,
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +201,7 @@ pub struct KeybindingsConfig {
     pub page_up: Vec<KeyCombo>,
     pub top: Vec<KeyCombo>,
     pub bottom: Vec<KeyCombo>,
+    pub toggle_help: Vec<KeyCombo>,
 }
 
 impl Default for KeybindingsConfig {
@@ -214,6 +216,7 @@ impl Default for KeybindingsConfig {
             page_up: parse_combos(&["ctrl+b", "pageup"]),
             top: parse_combos(&["g", "home"]),
             bottom: parse_combos(&["shift+g", "G", "end"]),
+            toggle_help: parse_combos(&["?"]),
         }
     }
 }
@@ -237,6 +240,7 @@ impl KeybindingsConfig {
             (Action::PageUp, &self.page_up),
             (Action::Top, &self.top),
             (Action::Bottom, &self.bottom),
+            (Action::ToggleHelp, &self.toggle_help),
         ];
 
         for (action, combos) in bindings {
@@ -281,6 +285,10 @@ pub struct ThemeConfig {
     pub json_null: ThemeColor,
     pub json_punctuation: ThemeColor,
     pub line_number: ThemeColor,
+    pub mermaid_node_border: ThemeColor,
+    pub mermaid_node_text: ThemeColor,
+    pub mermaid_edge: ThemeColor,
+    pub mermaid_edge_label: ThemeColor,
 }
 
 impl Default for ThemeConfig {
@@ -310,6 +318,10 @@ impl Default for ThemeConfig {
             json_null: ThemeColor(Color::DarkGray),
             json_punctuation: ThemeColor(Color::White),
             line_number: ThemeColor(Color::DarkGray),
+            mermaid_node_border: ThemeColor(Color::Cyan),
+            mermaid_node_text: ThemeColor(Color::White),
+            mermaid_edge: ThemeColor(Color::DarkGray),
+            mermaid_edge_label: ThemeColor(Color::Yellow),
         }
     }
 }
@@ -443,6 +455,10 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # json_null = "darkgray"
 # json_punctuation = "white"
 # line_number = "darkgray"
+# mermaid_node_border = "cyan"
+# mermaid_node_text = "white"
+# mermaid_edge = "darkgray"
+# mermaid_edge_label = "yellow"
 
 # [behavior]
 # line_wrap = true

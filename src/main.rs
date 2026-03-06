@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod event;
 mod markdown;
+mod mermaid;
 mod ui;
 mod watcher;
 
