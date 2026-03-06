@@ -212,7 +212,7 @@ impl Default for KeybindingsConfig {
             scroll_up: parse_combos(&["k", "up"]),
             half_page_down: parse_combos(&["ctrl+d"]),
             half_page_up: parse_combos(&["ctrl+u"]),
-            page_down: parse_combos(&["ctrl+f", "pagedown"]),
+            page_down: parse_combos(&["ctrl+f", "pagedown", "space"]),
             page_up: parse_combos(&["ctrl+b", "pageup"]),
             top: parse_combos(&["g", "home"]),
             bottom: parse_combos(&["shift+g", "G", "end"]),
@@ -420,7 +420,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # scroll_up = ["k", "up"]
 # half_page_down = ["ctrl+d"]
 # half_page_up = ["ctrl+u"]
-# page_down = ["ctrl+f", "pagedown"]
+# page_down = ["ctrl+f", "pagedown", "space"]
 # page_up = ["ctrl+b", "pageup"]
 # top = ["g", "home"]
 # bottom = ["shift+g", "G", "end"]
