@@ -19,8 +19,28 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let theme = &app.config().theme;
 
-    // Content
-    let mut content = Paragraph::new(app.rendered_content().clone())
+    // Content with line numbers
+    let total = app.total_lines();
+    let gutter_width = if total == 0 { 1 } else { total.ilog10() as usize + 1 };
+    let lineno_style = Style::default().fg(theme.line_number.0);
+    let sep_style = Style::default().fg(theme.line_number.0);
+
+    let numbered_lines: Vec<Line<'static>> = app
+        .rendered_content()
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let mut spans = vec![
+                Span::styled(format!("{:>width$} ", i + 1, width = gutter_width), lineno_style),
+                Span::styled("│ ", sep_style),
+            ];
+            spans.extend(line.spans.iter().cloned());
+            Line::from(spans)
+        })
+        .collect();
+
+    let mut content = Paragraph::new(numbered_lines)
         .scroll((app.scroll_offset(), 0));
     if app.config().behavior.line_wrap {
         content = content.wrap(Wrap { trim: false });

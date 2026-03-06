@@ -179,6 +179,10 @@ impl MarkdownWriter {
         }
     }
 
+    fn push_blank_line(&mut self) {
+        self.lines.push(Line::from(""));
+    }
+
     fn list_prefix(&self) -> String {
         if self.list_stack.is_empty() {
             return String::new();
@@ -225,6 +229,7 @@ impl MarkdownWriter {
                     "─".repeat(80),
                     Style::default().fg(self.theme.horizontal_rule.0),
                 )));
+                self.push_blank_line();
             }
             Event::TaskListMarker(checked) => {
                 let marker = if checked { "[x] " } else { "[ ] " };
@@ -323,14 +328,19 @@ impl MarkdownWriter {
             TagEnd::Heading(_) => {
                 self.style_stack.pop();
                 self.flush_line();
+                self.push_blank_line();
             }
             TagEnd::Paragraph => {
                 self.flush_line();
+                if self.list_stack.is_empty() {
+                    self.push_blank_line();
+                }
             }
             TagEnd::BlockQuote(_) => {
                 self.in_blockquote = false;
                 self.style_stack.pop();
                 self.flush_line();
+                self.push_blank_line();
             }
             TagEnd::CodeBlock => {
                 let code_style = Style::default()
@@ -346,6 +356,7 @@ impl MarkdownWriter {
                     }
                 }
                 self.in_code_block = false;
+                self.push_blank_line();
             }
             TagEnd::List(_) => {
                 // Increment ordered list counter if applicable
@@ -354,6 +365,9 @@ impl MarkdownWriter {
                 }
                 self.list_stack.pop();
                 self.flush_line();
+                if self.list_stack.is_empty() {
+                    self.push_blank_line();
+                }
             }
             TagEnd::Item => {
                 self.flush_line();
@@ -382,6 +396,7 @@ impl MarkdownWriter {
             }
             TagEnd::Table => {
                 self.flush_line();
+                self.push_blank_line();
             }
             TagEnd::TableHead => {
                 self.flush_line();

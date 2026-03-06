@@ -280,6 +280,7 @@ pub struct ThemeConfig {
     pub json_boolean: ThemeColor,
     pub json_null: ThemeColor,
     pub json_punctuation: ThemeColor,
+    pub line_number: ThemeColor,
 }
 
 impl Default for ThemeConfig {
@@ -308,6 +309,7 @@ impl Default for ThemeConfig {
             json_boolean: ThemeColor(Color::Yellow),
             json_null: ThemeColor(Color::DarkGray),
             json_punctuation: ThemeColor(Color::White),
+            line_number: ThemeColor(Color::DarkGray),
         }
     }
 }
@@ -440,6 +442,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # json_boolean = "yellow"
 # json_null = "darkgray"
 # json_punctuation = "white"
+# line_number = "darkgray"
 
 # [behavior]
 # line_wrap = true
