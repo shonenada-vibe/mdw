@@ -6,6 +6,7 @@ use ratatui::DefaultTerminal;
 use ratatui::text::Text;
 
 use crate::config::{Action, Config};
+use crate::d2;
 use crate::event::{AppEvent, EventHandler};
 use crate::markdown;
 use crate::mermaid;
@@ -17,6 +18,7 @@ pub struct App {
     is_markdown: bool,
     is_json: bool,
     is_mermaid: bool,
+    is_d2: bool,
     raw_content: String,
     rendered_content: Text<'static>,
     total_lines: usize,
@@ -34,12 +36,14 @@ impl App {
         let is_markdown = ext.is_some_and(|e| matches!(e, "md" | "markdown" | "mdx"));
         let is_json = ext.is_some_and(|e| e == "json");
         let is_mermaid = ext.is_some_and(|e| e == "mermaid");
+        let is_d2 = ext.is_some_and(|e| e == "d2");
 
         let mut app = App {
             file_path,
             is_markdown,
             is_json,
             is_mermaid,
+            is_d2,
             raw_content: String::new(),
             rendered_content: Text::default(),
             total_lines: 0,
@@ -94,6 +98,8 @@ impl App {
             markdown::render_json(&self.raw_content, &self.config.theme)
         } else if self.is_mermaid {
             mermaid::render_mermaid(&self.raw_content, &self.config.theme)
+        } else if self.is_d2 {
+            d2::render_d2(&self.raw_content, &self.config.theme)
         } else {
             markdown::render_plain(&self.raw_content)
         };

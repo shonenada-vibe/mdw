@@ -1,0 +1,52 @@
+direction: down
+
+External: "[WhatsApp / 微信 / Telegram 等站外]"
+ClickLink: "点击群链接 / 扫码"
+Landing: "[Landing Page]"
+Launch1: "Launch"
+Launch2: "Launch"
+Launch3: "Launch"
+JoinSheet1: "JoinSheet"
+JoinSheet2: "JoinSheet"
+JoinSheet3: "JoinSheet"
+
+External -> ClickLink -> Landing -> InstalledCheck
+
+InstalledCheck: {
+  shape: diamond
+  label: "是否已安装 App"
+}
+
+NotInstalled: {
+  label: "未安装 App"
+}
+
+Installed: {
+  label: "已安装 App"
+}
+
+InstalledCheck -> NotInstalled: "否"
+InstalledCheck -> Installed: "是"
+
+NotInstalled -> AppStore: "跳 AppStore"
+AppStore -> Install: "安装 App"
+Install -> FirstLaunch: "首次启动"
+FirstLaunch -> RegisterLogin: "注册 / 登录"
+RegisterLogin -> OpenLandingPage: "重新打开链接、二维码"
+OpenLandingPage -> JoinSheet1: "弹 Join Sheet"
+
+Installed -> LoginCheck: {
+  shape: diamond
+  label: "是否已登录"
+}
+
+LoginCheck -> LoggedIn: "已登录"
+LoginCheck -> NotLoggedIn: "未登录"
+
+LoggedIn -> Launch1: "启动 App"
+Launch1 -> JoinSheet2: "弹 Join Sheet"
+
+NotLoggedIn -> Launch2: "启动 App"
+Launch2 -> LoginSuccess: "登录成功"
+LoginSuccess -> JoinSheet3: "弹 Join Sheet"
+

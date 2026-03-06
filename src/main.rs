@@ -1,5 +1,6 @@
 mod app;
 mod config;
+mod d2;
 mod event;
 mod markdown;
 mod mermaid;
