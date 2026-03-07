@@ -62,8 +62,9 @@ fn main() -> anyhow::Result<()> {
         let mut content = String::new();
         io::stdin().read_to_string(&mut content)?;
 
-        let mut terminal = ratatui::init();
+        // Init picker after reading stdin but before ratatui takes over terminal
         let picker = init_picker();
+        let mut terminal = ratatui::init();
         let result = app::App::from_stdin(content, config, picker)?.run(&mut terminal);
         ratatui::restore();
         result
@@ -72,8 +73,9 @@ fn main() -> anyhow::Result<()> {
             anyhow::bail!("File not found: {}", file.display());
         }
 
-        let mut terminal = ratatui::init();
+        // Init picker before ratatui takes over terminal (from_query_stdio needs raw stdio)
         let picker = init_picker();
+        let mut terminal = ratatui::init();
         let result = app::App::new(file, config, picker)?.run(&mut terminal);
         ratatui::restore();
         result
@@ -81,9 +83,17 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn init_picker() -> Option<ratatui_image::picker::Picker> {
-    ratatui_image::picker::Picker::from_query_stdio()
-        .ok()
-        .or_else(|| Some(ratatui_image::picker::Picker::halfblocks()))
+    let mut picker = ratatui_image::picker::Picker::from_query_stdio()
+        .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
+
+    // Sixel detection via DA1 can produce false positives on terminals that
+    // report the capability flag but don't actually render sixel images.
+    // Fall back to halfblocks which works universally.
+    if picker.protocol_type() == ratatui_image::picker::ProtocolType::Sixel {
+        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Halfblocks);
+    }
+
+    Some(picker)
 }
 
 fn run_config_setup() -> anyhow::Result<()> {

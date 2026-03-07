@@ -199,7 +199,6 @@ impl App {
                     Ok(img) => {
                         if let Some(ref mut picker) = self.picker {
                             let font_size = picker.font_size();
-                            // Use a reasonable default width; will be recomputed on first render
                             let cols = 80u16;
                             *display_height = image_loader::compute_display_height(&img, cols, font_size);
                             *protocol = Some(picker.new_resize_protocol(img));

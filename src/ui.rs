@@ -240,7 +240,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                             frame.render_stateful_widget(image_widget, image_rect, proto);
                         }
                     }
-                    BlockKind::ImageWithError(err) => {
+                    BlockKind::ImageWithError(ref err) => {
                         let err_text = format!("[Image Error: {err}]");
                         let err_style = Style::default().fg(theme.blockquote.0);
                         let err_line = Line::from(Span::styled(err_text, err_style));
