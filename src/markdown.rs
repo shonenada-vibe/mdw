@@ -8,6 +8,7 @@ use crate::config::ThemeConfig;
 use crate::content::{ContentBlock, ImageSource};
 use crate::d2;
 use crate::mermaid;
+use crate::syntax_highlight;
 
 #[derive(Debug, Clone)]
 pub struct LinkInfo {
@@ -417,6 +418,32 @@ impl MarkdownWriter {
                     };
                     for line in rendered.lines {
                         self.lines.push(line);
+                    }
+                } else if let Some(ref lang_str) = lang {
+                    if let Some(highlighted) = syntax_highlight::highlight_code(&code_content, lang_str) {
+                        let bg = self.theme.code_block_bg.0;
+                        for line in highlighted {
+                            let mut indented_spans = vec![Span::styled("  ", Style::default().bg(bg))];
+                            for span in line.spans {
+                                let style = if span.style.bg.is_none() {
+                                    span.style.bg(bg)
+                                } else {
+                                    span.style
+                                };
+                                indented_spans.push(Span::styled(span.content, style));
+                            }
+                            self.lines.push(Line::from(indented_spans));
+                        }
+                    } else {
+                        let code_style = Style::default()
+                            .fg(self.theme.code_block_fg.0)
+                            .bg(self.theme.code_block_bg.0);
+                        for line in code_content.split('\n') {
+                            self.lines.push(Line::from(Span::styled(
+                                format!("  {line}"),
+                                code_style,
+                            )));
+                        }
                     }
                 } else {
                     let code_style = Style::default()
