@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 
 use crate::config::ThemeConfig;
 use crate::content::{ContentBlock, ImageSource};
+use crate::d2;
+use crate::mermaid;
 
 #[derive(Debug, Clone)]
 pub struct LinkInfo {
@@ -149,6 +151,7 @@ struct MarkdownWriter {
     style_stack: Vec<Style>,
     list_stack: Vec<ListKind>,
     in_code_block: bool,
+    code_block_lang: Option<String>,
     code_block_lines: Vec<String>,
     in_blockquote: bool,
     link_url: Option<String>,
@@ -171,6 +174,7 @@ impl MarkdownWriter {
             style_stack: Vec::new(),
             list_stack: Vec::new(),
             in_code_block: false,
+            code_block_lang: None,
             code_block_lines: Vec::new(),
             in_blockquote: false,
             link_url: None,
@@ -318,9 +322,16 @@ impl MarkdownWriter {
                     Style::default().fg(bq_color),
                 ));
             }
-            Tag::CodeBlock(_) => {
+            Tag::CodeBlock(kind) => {
                 self.flush_line();
                 self.in_code_block = true;
+                self.code_block_lang = match &kind {
+                    CodeBlockKind::Fenced(lang) => {
+                        let lang = lang.split_whitespace().next().unwrap_or("").to_lowercase();
+                        if lang.is_empty() { None } else { Some(lang) }
+                    }
+                    CodeBlockKind::Indented => None,
+                };
                 self.code_block_lines.clear();
             }
             Tag::List(first_item) => {
@@ -394,11 +405,24 @@ impl MarkdownWriter {
                 self.push_blank_line();
             }
             TagEnd::CodeBlock => {
-                let code_style = Style::default()
-                    .fg(self.theme.code_block_fg.0)
-                    .bg(self.theme.code_block_bg.0);
-                for code_line in self.code_block_lines.drain(..) {
-                    for line in code_line.split('\n') {
+                let lang = self.code_block_lang.take();
+                let code_content: String = self.code_block_lines.drain(..).collect::<Vec<_>>().join("");
+                let is_diagram = matches!(lang.as_deref(), Some("mermaid") | Some("d2"));
+
+                if is_diagram {
+                    let rendered = match lang.as_deref() {
+                        Some("mermaid") => mermaid::render_mermaid(&code_content, &self.theme),
+                        Some("d2") => d2::render_d2(&code_content, &self.theme),
+                        _ => unreachable!(),
+                    };
+                    for line in rendered.lines {
+                        self.lines.push(line);
+                    }
+                } else {
+                    let code_style = Style::default()
+                        .fg(self.theme.code_block_fg.0)
+                        .bg(self.theme.code_block_bg.0);
+                    for line in code_content.split('\n') {
                         self.lines.push(Line::from(Span::styled(
                             format!("  {line}"),
                             code_style,
