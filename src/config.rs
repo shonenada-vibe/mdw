@@ -186,6 +186,7 @@ pub enum Action {
     SearchForward,
     SearchNext,
     SearchPrev,
+    ToggleSplitView,
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +209,7 @@ pub struct KeybindingsConfig {
     pub search_forward: Vec<KeyCombo>,
     pub search_next: Vec<KeyCombo>,
     pub search_prev: Vec<KeyCombo>,
+    pub toggle_split_view: Vec<KeyCombo>,
 }
 
 impl Default for KeybindingsConfig {
@@ -226,6 +228,7 @@ impl Default for KeybindingsConfig {
             search_forward: parse_combos(&["/"]),
             search_next: parse_combos(&["n"]),
             search_prev: parse_combos(&["N", "shift+n"]),
+            toggle_split_view: parse_combos(&["s"]),
         }
     }
 }
@@ -253,6 +256,7 @@ impl KeybindingsConfig {
             (Action::SearchForward, &self.search_forward),
             (Action::SearchNext, &self.search_next),
             (Action::SearchPrev, &self.search_prev),
+            (Action::ToggleSplitView, &self.toggle_split_view),
         ];
 
         for (action, combos) in bindings {
@@ -449,6 +453,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # search_forward = ["/"]
 # search_next = ["n"]
 # search_prev = ["N", "shift+n"]
+# toggle_split_view = ["s"]
 
 # [theme]
 # Colors can be named colors or hex "#rrggbb".

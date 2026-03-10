@@ -41,6 +41,7 @@ pub struct App {
     hover_line: Option<usize>,
     picker: Option<Picker>,
     base_dir: PathBuf,
+    split_view: bool,
 }
 
 impl App {
@@ -81,6 +82,7 @@ impl App {
             hover_line: None,
             picker,
             base_dir,
+            split_view: false,
         };
 
         app.reload_file()?;
@@ -113,6 +115,7 @@ impl App {
             hover_line: None,
             picker,
             base_dir: PathBuf::from("."),
+            split_view: false,
         };
 
         app.raw_content = content;
@@ -348,6 +351,9 @@ impl App {
             Action::SearchPrev => {
                 self.jump_to_prev_match();
             }
+            Action::ToggleSplitView => {
+                self.split_view = !self.split_view;
+            }
         }
     }
 
@@ -561,6 +567,14 @@ impl App {
 
     pub fn gutter_width(&self) -> usize {
         self.gutter_width
+    }
+
+    pub fn split_view(&self) -> bool {
+        self.split_view
+    }
+
+    pub fn raw_content(&self) -> &str {
+        &self.raw_content
     }
 }
 
