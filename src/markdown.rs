@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 
@@ -165,6 +165,14 @@ struct MarkdownWriter {
     in_image: bool,
     image_url: Option<String>,
     image_alt_parts: Vec<String>,
+    // Table support
+    in_table: bool,
+    table_alignments: Vec<Alignment>,
+    table_head: Vec<Vec<Span<'static>>>,
+    table_rows: Vec<Vec<Vec<Span<'static>>>>,
+    current_row: Vec<Vec<Span<'static>>>,
+    current_cell: Vec<Span<'static>>,
+    in_table_head: bool,
 }
 
 impl MarkdownWriter {
@@ -187,6 +195,13 @@ impl MarkdownWriter {
             in_image: false,
             image_url: None,
             image_alt_parts: Vec::new(),
+            in_table: false,
+            table_alignments: Vec::new(),
+            table_head: Vec::new(),
+            table_rows: Vec::new(),
+            current_row: Vec::new(),
+            current_cell: Vec::new(),
+            in_table_head: false,
         }
     }
 
@@ -235,6 +250,106 @@ impl MarkdownWriter {
         }
     }
 
+    fn cell_text_width(spans: &[Span<'_>]) -> usize {
+        spans.iter().map(|s| s.content.chars().count()).sum()
+    }
+
+    fn render_table(&mut self) {
+        let border_style = Style::default().fg(self.theme.table_border.0);
+        let header_style = Style::default()
+            .fg(self.theme.table_header_fg.0)
+            .add_modifier(Modifier::BOLD);
+
+        let num_cols = self.table_head.len().max(
+            self.table_rows.iter().map(|r| r.len()).max().unwrap_or(0),
+        );
+        if num_cols == 0 {
+            return;
+        }
+
+        let mut col_widths = vec![0usize; num_cols];
+        for (i, cell) in self.table_head.iter().enumerate() {
+            col_widths[i] = col_widths[i].max(Self::cell_text_width(cell));
+        }
+        for row in &self.table_rows {
+            for (i, cell) in row.iter().enumerate() {
+                if i < num_cols {
+                    col_widths[i] = col_widths[i].max(Self::cell_text_width(cell));
+                }
+            }
+        }
+        for w in &mut col_widths {
+            *w = (*w).max(3);
+        }
+
+        let make_border = |left: &str, mid: &str, right: &str, col_widths: &[usize]| -> Line<'static> {
+            let mut s = String::from(left);
+            for (i, &w) in col_widths.iter().enumerate() {
+                s.push_str(&"\u{2500}".repeat(w + 2));
+                if i < col_widths.len() - 1 {
+                    s.push_str(mid);
+                }
+            }
+            s.push_str(right);
+            Line::from(Span::styled(s, border_style))
+        };
+
+        let render_row = |cells: &[Vec<Span<'static>>], col_widths: &[usize], alignments: &[Alignment], style_override: Option<Style>| -> Line<'static> {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            spans.push(Span::styled("\u{2502} ", border_style));
+            for i in 0..col_widths.len() {
+                let cell = cells.get(i);
+                let text_width = cell.map_or(0, |c| Self::cell_text_width(c));
+                let pad = col_widths[i].saturating_sub(text_width);
+                let alignment = alignments.get(i).copied().unwrap_or(Alignment::None);
+                let (left_pad, right_pad) = match alignment {
+                    Alignment::Center => (pad / 2, pad - pad / 2),
+                    Alignment::Right => (pad, 0),
+                    _ => (0, pad),
+                };
+
+                if left_pad > 0 {
+                    spans.push(Span::raw(" ".repeat(left_pad)));
+                }
+                if let Some(cell_spans) = cell {
+                    for span in cell_spans {
+                        if let Some(override_s) = style_override {
+                            spans.push(Span::styled(span.content.clone(), override_s));
+                        } else {
+                            spans.push(span.clone());
+                        }
+                    }
+                }
+                if right_pad > 0 {
+                    spans.push(Span::raw(" ".repeat(right_pad)));
+                }
+
+                if i < col_widths.len() - 1 {
+                    spans.push(Span::styled(" \u{2502} ", border_style));
+                }
+            }
+            spans.push(Span::styled(" \u{2502}", border_style));
+            Line::from(spans)
+        };
+
+        // Top border
+        self.lines.push(make_border("\u{250C}", "\u{252C}", "\u{2510}", &col_widths));
+
+        // Header row
+        if !self.table_head.is_empty() {
+            self.lines.push(render_row(&self.table_head, &col_widths, &self.table_alignments, Some(header_style)));
+            self.lines.push(make_border("\u{251C}", "\u{253C}", "\u{2524}", &col_widths));
+        }
+
+        // Body rows
+        for row in &self.table_rows {
+            self.lines.push(render_row(row, &col_widths, &self.table_alignments, None));
+        }
+
+        // Bottom border
+        self.lines.push(make_border("\u{2514}", "\u{2534}", "\u{2518}", &col_widths));
+    }
+
     fn handle_event(&mut self, event: Event<'_>) {
         match event {
             Event::Start(tag) => self.handle_start(tag),
@@ -244,6 +359,9 @@ impl MarkdownWriter {
                     self.image_alt_parts.push(text.to_string());
                 } else if self.in_code_block {
                     self.code_block_lines.push(text.to_string());
+                } else if self.in_table {
+                    let style = self.current_style();
+                    self.current_cell.push(Span::styled(text.to_string(), style));
                 } else {
                     let style = self.current_style();
                     self.current_spans.push(Span::styled(text.to_string(), style));
@@ -252,6 +370,14 @@ impl MarkdownWriter {
             Event::Code(code) => {
                 if self.in_image {
                     self.image_alt_parts.push(code.to_string());
+                } else if self.in_table {
+                    let style = Style::default()
+                        .fg(self.theme.inline_code_fg.0)
+                        .bg(self.theme.inline_code_bg.0);
+                    self.current_cell.push(Span::styled(
+                        format!(" {code} "),
+                        style,
+                    ));
                 } else {
                     let style = Style::default()
                         .fg(self.theme.inline_code_fg.0)
@@ -372,16 +498,23 @@ impl MarkdownWriter {
                 self.image_url = Some(dest_url.to_string());
                 self.image_alt_parts.clear();
             }
-            Tag::Table(_) => {
+            Tag::Table(alignments) => {
                 self.flush_line();
+                self.in_table = true;
+                self.table_alignments = alignments;
+                self.table_head.clear();
+                self.table_rows.clear();
             }
-            Tag::TableHead => {}
+            Tag::TableHead => {
+                self.in_table_head = true;
+                self.current_row.clear();
+            }
             Tag::TableRow => {
-                self.flush_line();
-                let style = self.current_style();
-                self.current_spans.push(Span::styled("│ ", style));
+                self.current_row.clear();
             }
-            Tag::TableCell => {}
+            Tag::TableCell => {
+                self.current_cell.clear();
+            }
             _ => {}
         }
     }
@@ -522,24 +655,24 @@ impl MarkdownWriter {
                 self.block_start_row += 1; // Image takes at least 1 row initially
             }
             TagEnd::Table => {
-                self.flush_line();
+                self.render_table();
+                self.in_table = false;
                 self.push_blank_line();
             }
             TagEnd::TableHead => {
-                self.flush_line();
-                self.lines.push(Line::from(Span::styled(
-                    "─".repeat(80),
-                    Style::default().fg(self.theme.horizontal_rule.0),
-                )));
+                let row = std::mem::take(&mut self.current_row);
+                self.table_head = row;
+                self.in_table_head = false;
             }
             TagEnd::TableRow => {
-                let style = self.current_style();
-                self.current_spans.push(Span::styled(" │", style));
-                self.flush_line();
+                if !self.in_table_head {
+                    let row = std::mem::take(&mut self.current_row);
+                    self.table_rows.push(row);
+                }
             }
             TagEnd::TableCell => {
-                let style = self.current_style();
-                self.current_spans.push(Span::styled(" │ ", style));
+                let cell = std::mem::take(&mut self.current_cell);
+                self.current_row.push(cell);
             }
             _ => {}
         }

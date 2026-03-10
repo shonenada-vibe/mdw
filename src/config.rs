@@ -304,6 +304,8 @@ pub struct ThemeConfig {
     pub search_match_fg: ThemeColor,
     pub search_match_bg: ThemeColor,
     pub hover_bg: ThemeColor,
+    pub table_border: ThemeColor,
+    pub table_header_fg: ThemeColor,
 }
 
 impl Default for ThemeConfig {
@@ -340,6 +342,8 @@ impl Default for ThemeConfig {
             search_match_fg: ThemeColor(Color::Black),
             search_match_bg: ThemeColor(Color::Yellow),
             hover_bg: ThemeColor(Color::Rgb(80, 80, 100)),
+            table_border: ThemeColor(Color::DarkGray),
+            table_header_fg: ThemeColor(Color::Cyan),
         }
     }
 }
@@ -480,6 +484,8 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # mermaid_node_text = "white"
 # mermaid_edge = "darkgray"
 # mermaid_edge_label = "yellow"
+# table_border = "darkgray"
+# table_header_fg = "cyan"
 
 # [behavior]
 # line_wrap = true

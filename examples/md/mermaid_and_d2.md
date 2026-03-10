@@ -26,7 +26,7 @@ graph TD
 D2:
 
 ```d2
-x -> y: hello world
+x -> y: "hello world"
 ```
 
 ```d2

@@ -37,6 +37,14 @@ Some text after the horizontal rule.
 
 ~~Strikethrough text~~ and normal text.
 
+## Tables
+
+| Name | Language | Stars |
+|------|:--------:|------:|
+| mdw | Rust | 42 |
+| bat | Rust | 50000 |
+| glow | Go | 16000 |
+
 That's all folks!
 
 ![image](../../assets/screenshot.jpg)
