@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.1] - 2026-03-11
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.8.1
+
+### Fixed
+Failed to render seqeuence diagram
+
 ## [v0.8.0] - 2026-03-10
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.8.0
