@@ -16,9 +16,13 @@
 
 - Syntax-highlighted markdown rendering in the terminal
 - Live reload — file changes are reflected instantly
+- Tables with box-drawing borders and column alignment
+- Inline images (iTerm2 / Kitty protocols)
+- Mermaid and D2 diagram rendering
+- Search (`/`, `n`, `N`)
 - Vim-style keybindings (`j`/`k`, `g`/`G`, `ctrl+d`/`ctrl+u`, ...)
 - Fully configurable keybindings, theme colors, and behavior via TOML
-- Scrollbar and status bar
+- Scrollbar, status bar, and help panel (`?`)
 
 ## Installation
 
@@ -82,6 +86,10 @@ page_down = ["ctrl+f", "pagedown"]
 page_up = ["ctrl+b", "pageup"]
 top = ["g", "home"]
 bottom = ["shift+g", "G", "end"]
+toggle_help = ["?"]
+search_forward = ["/"]
+search_next = ["n"]
+search_prev = ["N", "shift+n"]
 ```
 
 Key format: `"key"`, `"ctrl+key"`, `"shift+key"`, `"alt+key"`. Special keys: `up`, `down`, `pageup`, `pagedown`, `home`, `end`, `esc`, `enter`, `space`, `tab`.
@@ -107,6 +115,8 @@ horizontal_rule = "darkgray"
 status_bar_bg = "darkgray"
 status_bar_fg = "white"
 status_bar_message_fg = "yellow"
+table_border = "darkgray"
+table_header_fg = "cyan"
 ```
 
 Colors can be named (`red`, `lightblue`, `darkgray`, ...) or hex (`#rrggbb`).
