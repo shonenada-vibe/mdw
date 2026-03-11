@@ -521,7 +521,7 @@ fn render_sequence(input: &str, theme: &ThemeConfig) -> Text<'static> {
         }
 
         // Parse message: From ->>|-->>|->|--> To : label
-        let arrows = ["->>", "-->>", "->", "-->"];
+        let arrows = ["-->>", "->>", "-->", "->"];
         let mut found = false;
         for arrow in &arrows {
             if let Some(ap) = line.find(arrow) {
@@ -709,7 +709,12 @@ fn render_sequence(input: &str, theme: &ThemeConfig) -> Text<'static> {
                 if from_cx <= to_cx {
                     spans.push(Span::styled(arrow_str, edge_s));
                 } else {
-                    let tip_first = format!("{}{}", arrow_tip, &arrow_str[..arrow_str.len() - 1]);
+                    // Build reversed arrow: tip first, then the shaft
+                    let mut tip_first = String::new();
+                    tip_first.push(arrow_tip);
+                    for _ in 0..arrow_width.saturating_sub(1) {
+                        tip_first.push(arrow_ch);
+                    }
                     spans.push(Span::styled(tip_first, edge_s));
                 }
                 if !label_line.is_empty() {

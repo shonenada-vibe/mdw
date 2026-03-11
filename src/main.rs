@@ -10,6 +10,7 @@ mod syntax_highlight;
 mod ui;
 mod watcher;
 
+use std::fs;
 use std::io::{self, Read as _};
 use std::path::PathBuf;
 
@@ -23,6 +24,10 @@ struct Cli {
 
     /// Path to the file to view
     file: Option<PathBuf>,
+
+    /// Render to a text file instead of interactive mode (headless)
+    #[arg(long)]
+    screenshot: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -58,6 +63,16 @@ fn main() -> anyhow::Result<()> {
     let config = config::Config::load()?;
 
     let is_stdin = file.as_os_str() == "-";
+
+    if let Some(output) = cli.screenshot {
+        if is_stdin {
+            anyhow::bail!("--screenshot does not support stdin input");
+        }
+        if !file.exists() {
+            anyhow::bail!("File not found: {}", file.display());
+        }
+        return run_screenshot(file, config, output);
+    }
 
     if is_stdin {
         let mut content = String::new();
@@ -95,6 +110,41 @@ fn init_picker() -> Option<ratatui_image::picker::Picker> {
     }
 
     Some(picker)
+}
+
+fn run_screenshot(file: PathBuf, config: config::Config, output: PathBuf) -> anyhow::Result<()> {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend)?;
+    let mut app = app::App::new(file, config, None)?;
+
+    terminal.draw(|frame| ui::render(frame, &mut app))?;
+
+    // Extract text from the TestBackend's Display output, stripping the quote wrapping
+    let display = terminal.backend().to_string();
+    let mut lines = Vec::new();
+    for line in display.lines() {
+        if line.starts_with('"') && line.ends_with('"') {
+            lines.push(&line[1..line.len() - 1]);
+        } else if let Some(stripped) = line.strip_prefix('"') {
+            // Line may have hidden multi-width symbol info after the closing quote
+            if let Some(pos) = stripped.find('"') {
+                lines.push(&stripped[..pos]);
+            } else {
+                lines.push(line);
+            }
+        } else {
+            lines.push(line);
+        }
+    }
+
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&output, lines.join("\n"))?;
+    Ok(())
 }
 
 fn run_config_setup() -> anyhow::Result<()> {

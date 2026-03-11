@@ -1,0 +1,7 @@
+flowchart TD
+    A[Input] --> B[Process]
+    B --> C{Valid?}
+    C -->|Yes| D[Save]
+    C -->|No| E[Error]
+    D --> F[Done]
+    E --> B

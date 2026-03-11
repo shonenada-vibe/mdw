@@ -1,0 +1,20 @@
+{
+  "company": {
+    "name": "Acme Corp",
+    "departments": {
+      "engineering": {
+        "lead": "Bob",
+        "teams": {
+          "frontend": {
+            "members": ["Carol", "Dave"],
+            "stack": ["React", "TypeScript"]
+          },
+          "backend": {
+            "members": ["Eve", "Frank"],
+            "stack": ["Rust", "PostgreSQL"]
+          }
+        }
+      }
+    }
+  }
+}
