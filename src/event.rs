@@ -53,4 +53,8 @@ impl EventHandler {
     pub fn next(&self) -> anyhow::Result<AppEvent> {
         Ok(self.rx.recv()?)
     }
+
+    pub fn try_next(&self) -> Option<AppEvent> {
+        self.rx.try_recv().ok()
+    }
 }

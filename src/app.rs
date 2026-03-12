@@ -174,34 +174,46 @@ impl App {
         while !self.should_quit {
             terminal.draw(|frame| ui::render(frame, self))?;
 
-            match event_handler.next()? {
-                AppEvent::Key(key) => self.handle_key(key),
-                AppEvent::Mouse(mouse) => self.handle_mouse(mouse),
-                AppEvent::FileChanged => {
-                    if !self.is_stdin {
-                        if let Err(e) = self.reload_file() {
-                            self.status_message = format!("Error: {e}");
-                        } else {
-                            self.status_message = "Reloaded".to_string();
-                        }
-                    }
-                }
-                AppEvent::Resize => {
-                    self.recompute_image_heights();
-                }
-                AppEvent::Tick => {
-                    if let Some(start) = self.toast_start {
-                        if start.elapsed() >= Duration::from_secs(2) {
-                            self.toast_message = None;
-                            self.toast_start = None;
-                        }
-                    }
+            // Block for the first event, then drain all pending events before re-rendering
+            let first = event_handler.next()?;
+            self.process_event(first);
+            while let Some(event) = event_handler.try_next() {
+                self.process_event(event);
+                if self.should_quit {
+                    break;
                 }
             }
         }
 
         crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture)?;
         Ok(())
+    }
+
+    fn process_event(&mut self, event: AppEvent) {
+        match event {
+            AppEvent::Key(key) => self.handle_key(key),
+            AppEvent::Mouse(mouse) => self.handle_mouse(mouse),
+            AppEvent::FileChanged => {
+                if !self.is_stdin {
+                    if let Err(e) = self.reload_file() {
+                        self.status_message = format!("Error: {e}");
+                    } else {
+                        self.status_message = "Reloaded".to_string();
+                    }
+                }
+            }
+            AppEvent::Resize => {
+                self.recompute_image_heights();
+            }
+            AppEvent::Tick => {
+                if let Some(start) = self.toast_start {
+                    if start.elapsed() >= Duration::from_secs(2) {
+                        self.toast_message = None;
+                        self.toast_start = None;
+                    }
+                }
+            }
+        }
     }
 
     fn reload_file(&mut self) -> anyhow::Result<()> {
