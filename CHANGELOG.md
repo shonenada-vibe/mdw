@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.2] - 2026-03-12
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.8.2
+
+### Features
+- Add mouse scroll (ScrollDown/ScrollUp) support
+- Add YAML frontmatter rendering as compact Obsidian-style "Properties" block
+
+### Fixed
+- Fix scroll not reaching bottom by allowing scroll up to total_lines-1
+- Split gutter/content rendering so wrapped lines don't overlay line numbers
+- Add unicode-width for correct CJK column calculation in click detection,
+table alignment, and current_col()
+- Add visual-line-map so mouse hover/click works correctly after wrapped lines
+
 ## [v0.8.1] - 2026-03-11
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.8.1

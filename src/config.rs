@@ -370,6 +370,7 @@ pub struct BehaviorConfig {
     pub line_wrap: bool,
     pub debounce_ms: u64,
     pub scroll_speed: usize,
+    pub mouse_scroll: bool,
 }
 
 impl Default for BehaviorConfig {
@@ -378,6 +379,7 @@ impl Default for BehaviorConfig {
             line_wrap: true,
             debounce_ms: 200,
             scroll_speed: 1,
+            mouse_scroll: true,
         }
     }
 }
@@ -458,6 +460,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # page_up = ["ctrl+b", "pageup"]
 # top = ["g", "home"]
 # bottom = ["shift+g", "G", "end"]
+# toggle_help = ["?"]
 # search_forward = ["/"]
 # search_next = ["n"]
 # search_prev = ["N", "shift+n"]
@@ -497,13 +500,21 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # mermaid_node_text = "white"
 # mermaid_edge = "darkgray"
 # mermaid_edge_label = "yellow"
+# search_match_fg = "black"
+# search_match_bg = "yellow"
+# hover_bg = "#505064"
 # table_border = "darkgray"
 # table_header_fg = "cyan"
+# frontmatter_key = "#9e9e9e"
+# frontmatter_value = "#c8c8dc"
+# frontmatter_border = "#505064"
+# frontmatter_title = "#9e9e9e"
 
 # [behavior]
 # line_wrap = true
 # debounce_ms = 200
 # scroll_speed = 1
+# mouse_scroll = true
 "##;
 
 // ---------------------------------------------------------------------------

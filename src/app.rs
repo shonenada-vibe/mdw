@@ -492,10 +492,10 @@ impl App {
                     }
                 }
             }
-            MouseEventKind::ScrollDown => {
+            MouseEventKind::ScrollDown if self.config.behavior.mouse_scroll => {
                 self.scroll_down(self.config.behavior.scroll_speed);
             }
-            MouseEventKind::ScrollUp => {
+            MouseEventKind::ScrollUp if self.config.behavior.mouse_scroll => {
                 self.scroll_up(self.config.behavior.scroll_speed);
             }
             MouseEventKind::Moved => {
