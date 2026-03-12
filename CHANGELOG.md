@@ -2,9 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.8.3] - 2026-03-12
+## [v0.10.0] - 2026-03-12
 
-https://github.com/shonenada-vibe/mdw/releases/tag/v0.8.3
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.10.0
+
+### Features
+- Add mouse text selection: click and drag to select text with visual highlighting
+- Add right-click to copy selected text to clipboard
+- Add Ctrl-C to copy selected text when selection is active
+- Add toast notification at top of screen on copy success, auto-dismisses after 2 seconds
+- Add configurable selection theme colors (`selection_fg`, `selection_bg`)
+
+### Fixed
+- Fix scroll lag caused by rendering after every individual mouse event; drain event queue before re-rendering
+
+## [v0.9.0] - 2026-03-12
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.9.0
 
 ### Features
 - Click frontmatter property row to show full untruncated value in a popup overlay
