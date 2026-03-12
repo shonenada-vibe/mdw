@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.3] - 2026-03-12
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.8.3
+
+### Features
+- Click frontmatter property row to show full untruncated value in a popup overlay
+- Scrollable frontmatter popup with mouse scroll support
+- Dismiss popup with any key or left click
+
 ## [v0.8.2] - 2026-03-12
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.8.2

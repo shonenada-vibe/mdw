@@ -186,7 +186,7 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
 
 /// Render YAML frontmatter as a compact Obsidian-style "Properties" block.
 /// Each key-value pair is one line. Multiline values are joined with spaces and truncated.
-fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
+fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> (Vec<Line<'static>>, Vec<(String, String)>, Vec<LinkInfo>) {
     let border_style = Style::default().fg(theme.frontmatter_border.0);
     let title_style = Style::default()
         .fg(theme.frontmatter_title.0)
@@ -202,7 +202,7 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
 
     let flush = |key: &Option<String>, parts: &mut Vec<String>, entries: &mut Vec<(String, String)>| {
         if let Some(k) = key {
-            let joined = parts.join(" ");
+            let joined = parts.join("\n");
             entries.push((k.clone(), joined));
             parts.clear();
         }
@@ -236,7 +236,7 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
     flush(&current_key, &mut current_parts, &mut entries);
 
     if entries.is_empty() {
-        return Vec::new();
+        return (Vec::new(), Vec::new(), Vec::new());
     }
 
     let max_val_display = 72; // max display columns for value
@@ -251,12 +251,26 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
     ]));
 
     // Each entry as: "  key  :  value"
-    for (key, value) in &entries {
-        let display_val = if value.is_empty() {
+    let mut fm_link_infos: Vec<LinkInfo> = Vec::new();
+    for (idx, (key, value)) in entries.iter().enumerate() {
+        // For the compact property row, collapse newlines into spaces and truncate
+        let flat_value: String = value.lines().collect::<Vec<_>>().join(" ");
+        let display_val = if flat_value.is_empty() {
             "\u{2014}".to_string() // em dash for empty
         } else {
-            truncate_to_width(value, max_val_display)
+            truncate_to_width(&flat_value, max_val_display)
         };
+
+        let line_idx = lines.len(); // 0-based row within this block
+        // Register a LinkInfo spanning the entire property row for click detection
+        let col_start = 0;
+        let col_end = 2 + UnicodeWidthStr::width(key.as_str()) + 2 + UnicodeWidthStr::width(display_val.as_str());
+        fm_link_infos.push(LinkInfo {
+            line: line_idx,
+            col_start,
+            col_end,
+            url: format!("#frontmatter:{idx}"),
+        });
 
         lines.push(Line::from(vec![
             Span::styled("  ", border_style),
@@ -275,14 +289,15 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
     // Blank line after
     lines.push(Line::from(""));
 
-    lines
+    (lines, entries, fm_link_infos)
 }
 
-pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>) {
-    let (frontmatter_lines, md_input) = if let Some((fm_raw, rest)) = extract_frontmatter(input) {
-        (render_frontmatter(fm_raw, theme), rest)
+pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>, Vec<(String, String)>) {
+    let (frontmatter_lines, fm_entries, fm_link_infos, md_input) = if let Some((fm_raw, rest)) = extract_frontmatter(input) {
+        let (lines, entries, link_infos) = render_frontmatter(fm_raw, theme);
+        (lines, entries, link_infos, rest)
     } else {
-        (Vec::new(), input)
+        (Vec::new(), Vec::new(), Vec::new(), input)
     };
 
     let options = Options::ENABLE_STRIKETHROUGH
@@ -293,7 +308,8 @@ pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, 
     let mut writer = MarkdownWriter::new(theme.clone());
 
     if !frontmatter_lines.is_empty() {
-        let _fm_line_count = frontmatter_lines.len();
+        // Add frontmatter link infos (line indices are already relative to block start 0)
+        writer.link_infos.extend(fm_link_infos);
         writer.lines = frontmatter_lines;
         writer.block_start_row = 0;
         // Flush frontmatter as its own text block so line counting is correct
@@ -307,7 +323,8 @@ pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, 
         writer.handle_event(event);
     }
 
-    writer.finish()
+    let (blocks, link_infos, footnote_defs) = writer.finish();
+    (blocks, link_infos, footnote_defs, fm_entries)
 }
 
 enum ListKind {

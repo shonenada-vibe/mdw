@@ -48,6 +48,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Status bar
     render_status_bar(frame, app, chunks[1], &theme);
 
+    // Frontmatter popup overlay
+    if app.frontmatter_popup_index().is_some() {
+        render_frontmatter_popup(frame, app, &theme);
+    }
+
     // Help panel overlay
     if app.show_help() {
         render_help_overlay(frame, app, &theme);
@@ -590,6 +595,72 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
 
     frame.render_widget(Clear, help_area);
     frame.render_widget(help_paragraph, help_area);
+}
+
+fn render_frontmatter_popup(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
+    let idx = match app.frontmatter_popup_index() {
+        Some(i) => i,
+        None => return,
+    };
+    let entries = app.frontmatter_entries();
+    let (key, value) = match entries.get(idx) {
+        Some(entry) => entry,
+        None => return,
+    };
+
+    let area = frame.area();
+    let popup_w = (area.width * 80 / 100).max(30).min(area.width.saturating_sub(4));
+
+    // Split value into lines for display
+    let value_lines: Vec<&str> = value.lines().collect();
+    let content_height = value_lines.len().max(1) as u16 + 4; // +4 for border, title padding, footer
+    let popup_h = content_height.min(area.height.saturating_sub(4));
+
+    let popup_area = Rect {
+        x: (area.width.saturating_sub(popup_w)) / 2,
+        y: (area.height.saturating_sub(popup_h)) / 2,
+        width: popup_w,
+        height: popup_h,
+    };
+
+    let bg = theme.status_bar_bg.0;
+    let fg = theme.status_bar_fg.0;
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(""));
+    for vl in &value_lines {
+        lines.push(Line::from(Span::styled(
+            format!("  {vl}"),
+            Style::default().fg(fg),
+        )));
+    }
+    if value_lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (empty)".to_string(),
+            Style::default().fg(theme.line_number.0),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Press any key to close".to_string(),
+        Style::default().fg(theme.line_number.0),
+    )));
+
+    let title = format!(" {} ", key);
+    let popup_block = Block::default()
+        .title(title)
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .style(Style::default().bg(bg).fg(fg));
+
+    let scroll = app.frontmatter_popup_scroll();
+    let paragraph = Paragraph::new(lines)
+        .block(popup_block)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(paragraph, popup_area);
 }
 
 fn highlight_search_spans<'a>(

@@ -47,6 +47,9 @@ pub struct App {
     /// Maps visual row (0-based from viewport top) to logical line index.
     /// Built during rendering when line_wrap is enabled.
     visual_line_map: Vec<usize>,
+    frontmatter_entries: Vec<(String, String)>,
+    frontmatter_popup_index: Option<usize>,
+    frontmatter_popup_scroll: u16,
 }
 
 impl App {
@@ -90,6 +93,9 @@ impl App {
             base_dir,
             split_view: false,
             visual_line_map: Vec::new(),
+            frontmatter_entries: Vec::new(),
+            frontmatter_popup_index: None,
+            frontmatter_popup_scroll: 0,
         };
 
         app.reload_file()?;
@@ -125,6 +131,9 @@ impl App {
             base_dir: PathBuf::from("."),
             split_view: false,
             visual_line_map: Vec::new(),
+            frontmatter_entries: Vec::new(),
+            frontmatter_popup_index: None,
+            frontmatter_popup_scroll: 0,
         };
 
         app.raw_content = content;
@@ -182,12 +191,16 @@ impl App {
         self.link_infos.clear();
         self.footnote_def_lines.clear();
         self.content_blocks.clear();
+        self.frontmatter_entries.clear();
+        self.frontmatter_popup_index = None;
+        self.frontmatter_popup_scroll = 0;
 
         if self.is_markdown {
-            let (blocks, links, footnote_defs) = markdown::render_markdown(&self.raw_content, &self.config.theme);
+            let (blocks, links, footnote_defs, fm_entries) = markdown::render_markdown(&self.raw_content, &self.config.theme);
             self.content_blocks = blocks;
             self.link_infos = links;
             self.footnote_def_lines = footnote_defs;
+            self.frontmatter_entries = fm_entries;
             self.load_images();
         } else {
             let text = if self.is_json {
@@ -297,6 +310,11 @@ impl App {
                 }
                 _ => {}
             }
+            return;
+        }
+
+        if self.frontmatter_popup_index.is_some() {
+            self.frontmatter_popup_index = None;
             return;
         }
 
@@ -463,6 +481,28 @@ impl App {
     fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
         use crossterm::event::{MouseEventKind, MouseButton};
 
+        // When frontmatter popup is open, capture scroll events for the popup
+        if self.frontmatter_popup_index.is_some() {
+            match mouse.kind {
+                MouseEventKind::ScrollDown => {
+                    self.frontmatter_popup_scroll = self.frontmatter_popup_scroll.saturating_add(
+                        self.config.behavior.scroll_speed as u16,
+                    );
+                }
+                MouseEventKind::ScrollUp => {
+                    self.frontmatter_popup_scroll = self.frontmatter_popup_scroll.saturating_sub(
+                        self.config.behavior.scroll_speed as u16,
+                    );
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.frontmatter_popup_index = None;
+                    self.frontmatter_popup_scroll = 0;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let click_row = mouse.row;
@@ -485,6 +525,13 @@ impl App {
                             self.scroll_offset = (target_line as u16).saturating_sub(self.viewport_height / 4);
                             self.clamp_scroll();
                             self.status_message = format!("Jumped to footnote [{label}]");
+                        }
+                    } else if let Some(idx_str) = url.strip_prefix("#frontmatter:") {
+                        if let Ok(idx) = idx_str.parse::<usize>() {
+                            if idx < self.frontmatter_entries.len() {
+                                self.frontmatter_popup_index = Some(idx);
+                                self.frontmatter_popup_scroll = 0;
+                            }
                         }
                     } else {
                         self.status_message = format!("Opening: {url}");
@@ -607,6 +654,18 @@ impl App {
 
     pub fn set_visual_line_map(&mut self, map: Vec<usize>) {
         self.visual_line_map = map;
+    }
+
+    pub fn frontmatter_popup_index(&self) -> Option<usize> {
+        self.frontmatter_popup_index
+    }
+
+    pub fn frontmatter_entries(&self) -> &[(String, String)] {
+        &self.frontmatter_entries
+    }
+
+    pub fn frontmatter_popup_scroll(&self) -> u16 {
+        self.frontmatter_popup_scroll
     }
 
     /// Map a screen row to a logical line index.
