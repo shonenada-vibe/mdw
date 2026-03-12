@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -37,11 +38,15 @@ pub struct App {
     search_matches: Vec<usize>,
     current_match: Option<usize>,
     link_infos: Vec<LinkInfo>,
+    footnote_def_lines: HashMap<String, usize>,
     gutter_width: usize,
     hover_line: Option<usize>,
     picker: Option<Picker>,
     base_dir: PathBuf,
     split_view: bool,
+    /// Maps visual row (0-based from viewport top) to logical line index.
+    /// Built during rendering when line_wrap is enabled.
+    visual_line_map: Vec<usize>,
 }
 
 impl App {
@@ -78,11 +83,13 @@ impl App {
             search_matches: Vec::new(),
             current_match: None,
             link_infos: Vec::new(),
+            footnote_def_lines: HashMap::new(),
             gutter_width: 0,
             hover_line: None,
             picker,
             base_dir,
             split_view: false,
+            visual_line_map: Vec::new(),
         };
 
         app.reload_file()?;
@@ -111,11 +118,13 @@ impl App {
             search_matches: Vec::new(),
             current_match: None,
             link_infos: Vec::new(),
+            footnote_def_lines: HashMap::new(),
             gutter_width: 0,
             hover_line: None,
             picker,
             base_dir: PathBuf::from("."),
             split_view: false,
+            visual_line_map: Vec::new(),
         };
 
         app.raw_content = content;
@@ -171,12 +180,14 @@ impl App {
 
     fn render_content(&mut self) {
         self.link_infos.clear();
+        self.footnote_def_lines.clear();
         self.content_blocks.clear();
 
         if self.is_markdown {
-            let (blocks, links) = markdown::render_markdown(&self.raw_content, &self.config.theme);
+            let (blocks, links, footnote_defs) = markdown::render_markdown(&self.raw_content, &self.config.theme);
             self.content_blocks = blocks;
             self.link_infos = links;
+            self.footnote_def_lines = footnote_defs;
             self.load_images();
         } else {
             let text = if self.is_json {
@@ -462,20 +473,33 @@ impl App {
                     return;
                 }
                 let content_col = click_col - gutter_total;
-                let content_line = click_row as usize + self.scroll_offset as usize;
+
+                let content_line = match self.visual_row_to_line(click_row as usize) {
+                    Some(line) => line,
+                    None => return,
+                };
 
                 if let Some(url) = self.find_link_at(content_line, content_col) {
-                    self.status_message = format!("Opening: {url}");
-                    let _ = open_url(&url);
+                    if let Some(label) = url.strip_prefix("#footnote:") {
+                        if let Some(&target_line) = self.footnote_def_lines.get(label) {
+                            self.scroll_offset = (target_line as u16).saturating_sub(self.viewport_height / 4);
+                            self.clamp_scroll();
+                            self.status_message = format!("Jumped to footnote [{label}]");
+                        }
+                    } else {
+                        self.status_message = format!("Opening: {url}");
+                        let _ = open_url(&url);
+                    }
                 }
             }
+            MouseEventKind::ScrollDown => {
+                self.scroll_down(self.config.behavior.scroll_speed);
+            }
+            MouseEventKind::ScrollUp => {
+                self.scroll_up(self.config.behavior.scroll_speed);
+            }
             MouseEventKind::Moved => {
-                let content_line = mouse.row as usize + self.scroll_offset as usize;
-                if content_line < self.total_lines {
-                    self.hover_line = Some(content_line);
-                } else {
-                    self.hover_line = None;
-                }
+                self.hover_line = self.visual_row_to_line(mouse.row as usize);
             }
             _ => {}
         }
@@ -500,15 +524,19 @@ impl App {
     }
 
     fn scroll_to_bottom(&mut self) {
-        if self.total_lines as u16 > self.viewport_height {
-            self.scroll_offset = self.total_lines as u16 - self.viewport_height;
+        if self.total_lines > 0 {
+            self.scroll_offset = (self.total_lines - 1) as u16;
         } else {
             self.scroll_offset = 0;
         }
     }
 
     fn clamp_scroll(&mut self) {
-        let max_scroll = (self.total_lines as u16).saturating_sub(self.viewport_height);
+        let max_scroll = if self.total_lines > 0 {
+            (self.total_lines - 1) as u16
+        } else {
+            0
+        };
         self.scroll_offset = self.scroll_offset.min(max_scroll);
     }
 
@@ -575,6 +603,25 @@ impl App {
 
     pub fn raw_content(&self) -> &str {
         &self.raw_content
+    }
+
+    pub fn set_visual_line_map(&mut self, map: Vec<usize>) {
+        self.visual_line_map = map;
+    }
+
+    /// Map a screen row to a logical line index.
+    /// The visual_line_map is indexed by screen row (built during rendering).
+    fn visual_row_to_line(&self, screen_row: usize) -> Option<usize> {
+        if self.visual_line_map.is_empty() {
+            // No wrap mapping; fall back to 1:1
+            let line = screen_row + self.scroll_offset as usize;
+            if line < self.total_lines { Some(line) } else { None }
+        } else {
+            match self.visual_line_map.get(screen_row) {
+                Some(&v) if v != usize::MAX => Some(v),
+                _ => None,
+            }
+        }
     }
 }
 

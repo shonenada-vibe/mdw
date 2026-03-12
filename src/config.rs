@@ -310,6 +310,10 @@ pub struct ThemeConfig {
     pub hover_bg: ThemeColor,
     pub table_border: ThemeColor,
     pub table_header_fg: ThemeColor,
+    pub frontmatter_key: ThemeColor,
+    pub frontmatter_value: ThemeColor,
+    pub frontmatter_border: ThemeColor,
+    pub frontmatter_title: ThemeColor,
 }
 
 impl Default for ThemeConfig {
@@ -348,6 +352,10 @@ impl Default for ThemeConfig {
             hover_bg: ThemeColor(Color::Rgb(80, 80, 100)),
             table_border: ThemeColor(Color::DarkGray),
             table_header_fg: ThemeColor(Color::Cyan),
+            frontmatter_key: ThemeColor(Color::Rgb(158, 158, 158)),
+            frontmatter_value: ThemeColor(Color::Rgb(200, 200, 220)),
+            frontmatter_border: ThemeColor(Color::Rgb(80, 80, 100)),
+            frontmatter_title: ThemeColor(Color::Rgb(158, 158, 158)),
         }
     }
 }

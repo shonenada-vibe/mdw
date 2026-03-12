@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
+
+use unicode_width::UnicodeWidthStr;
 
 use crate::config::ThemeConfig;
 use crate::content::{ContentBlock, ImageSource};
@@ -127,12 +130,178 @@ pub fn render_plain(input: &str) -> Text<'static> {
     Text::from(lines)
 }
 
-pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, Vec<LinkInfo>) {
+/// Extract YAML frontmatter from the beginning of a markdown document.
+/// Returns (frontmatter_content, remaining_markdown) if frontmatter is found.
+fn extract_frontmatter(input: &str) -> Option<(&str, &str)> {
+    let trimmed = input.trim_start();
+    if !trimmed.starts_with("---") {
+        return None;
+    }
+    // Skip the opening ---
+    let after_open = &trimmed[3..];
+    // Must have a newline after opening ---
+    let after_open = after_open.strip_prefix('\n')
+        .or_else(|| after_open.strip_prefix("\r\n"))?;
+    // Find closing ---
+    if let Some(end_pos) = after_open.find("\n---") {
+        let frontmatter = &after_open[..end_pos];
+        let rest_start = end_pos + 4; // skip \n---
+        let rest = if rest_start < after_open.len() {
+            let r = &after_open[rest_start..];
+            // Skip the trailing newline after closing ---
+            r.strip_prefix('\n')
+                .or_else(|| r.strip_prefix("\r\n"))
+                .unwrap_or(r)
+        } else {
+            ""
+        };
+        Some((frontmatter, rest))
+    } else {
+        None
+    }
+}
+
+/// Truncate a string to fit within `max_cols` display columns, appending "…" if truncated.
+fn truncate_to_width(s: &str, max_cols: usize) -> String {
+    if max_cols == 0 {
+        return String::new();
+    }
+    let mut width = 0;
+    let mut end = s.len();
+    for (i, ch) in s.char_indices() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw > max_cols.saturating_sub(1) {
+            // Reserve 1 col for "…"
+            end = i;
+            break;
+        }
+        width += cw;
+    }
+    if end < s.len() {
+        format!("{}…", &s[..end])
+    } else {
+        s.to_string()
+    }
+}
+
+/// Render YAML frontmatter as a compact Obsidian-style "Properties" block.
+/// Each key-value pair is one line. Multiline values are joined with spaces and truncated.
+fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    let border_style = Style::default().fg(theme.frontmatter_border.0);
+    let title_style = Style::default()
+        .fg(theme.frontmatter_title.0)
+        .add_modifier(Modifier::BOLD);
+    let key_style = Style::default().fg(theme.frontmatter_key.0);
+    let value_style = Style::default().fg(theme.frontmatter_value.0);
+    let sep_style = Style::default().fg(theme.frontmatter_border.0);
+
+    // Collect key-value entries, handling multiline YAML values
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut current_key: Option<String> = None;
+    let mut current_parts: Vec<String> = Vec::new();
+
+    let flush = |key: &Option<String>, parts: &mut Vec<String>, entries: &mut Vec<(String, String)>| {
+        if let Some(k) = key {
+            let joined = parts.join(" ");
+            entries.push((k.clone(), joined));
+            parts.clear();
+        }
+    };
+
+    for line in raw.lines() {
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            if let Some((key, val)) = line.split_once(':') {
+                flush(&current_key, &mut current_parts, &mut entries);
+                let key = key.trim().to_string();
+                let val = val.trim().to_string();
+                current_key = Some(key);
+                if val == "|" || val == ">" {
+                    // Multiline block scalar — values follow on next lines
+                } else {
+                    let val = val.strip_prefix('"').and_then(|v| v.strip_suffix('"'))
+                        .map(|v| v.to_string())
+                        .unwrap_or(val);
+                    if !val.is_empty() {
+                        current_parts.push(val);
+                    }
+                }
+            }
+        } else {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                current_parts.push(trimmed.to_string());
+            }
+        }
+    }
+    flush(&current_key, &mut current_parts, &mut entries);
+
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let max_val_display = 72; // max display columns for value
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Header: "── Properties ──"
+    lines.push(Line::from(vec![
+        Span::styled("\u{2500}\u{2500} ", border_style),
+        Span::styled("Properties", title_style),
+        Span::styled(" \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}", border_style),
+    ]));
+
+    // Each entry as: "  key  :  value"
+    for (key, value) in &entries {
+        let display_val = if value.is_empty() {
+            "\u{2014}".to_string() // em dash for empty
+        } else {
+            truncate_to_width(value, max_val_display)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("  ", border_style),
+            Span::styled(key.clone(), key_style),
+            Span::styled("  ", sep_style),
+            Span::styled(display_val, value_style),
+        ]));
+    }
+
+    // Bottom separator
+    lines.push(Line::from(Span::styled(
+        "\u{2500}".repeat(20),
+        border_style,
+    )));
+
+    // Blank line after
+    lines.push(Line::from(""));
+
+    lines
+}
+
+pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>) {
+    let (frontmatter_lines, md_input) = if let Some((fm_raw, rest)) = extract_frontmatter(input) {
+        (render_frontmatter(fm_raw, theme), rest)
+    } else {
+        (Vec::new(), input)
+    };
+
     let options = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
-        | Options::ENABLE_TASKLISTS;
-    let parser = Parser::new_ext(input, options);
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES;
+    let parser = Parser::new_ext(md_input, options);
     let mut writer = MarkdownWriter::new(theme.clone());
+
+    if !frontmatter_lines.is_empty() {
+        let _fm_line_count = frontmatter_lines.len();
+        writer.lines = frontmatter_lines;
+        writer.block_start_row = 0;
+        // Flush frontmatter as its own text block so line counting is correct
+        let lines: Vec<Line<'static>> = writer.lines.drain(..).collect();
+        let line_count = lines.len();
+        writer.blocks.push(ContentBlock::Text { lines });
+        writer.block_start_row = line_count;
+    }
 
     for event in parser {
         writer.handle_event(event);
@@ -173,6 +342,12 @@ struct MarkdownWriter {
     current_row: Vec<Vec<Span<'static>>>,
     current_cell: Vec<Span<'static>>,
     in_table_head: bool,
+    // Footnote support
+    footnote_counter: usize,
+    footnote_labels: HashMap<String, usize>,
+    footnote_def_lines: HashMap<String, usize>,
+    in_footnote_def: bool,
+    current_footnote_label: Option<String>,
 }
 
 impl MarkdownWriter {
@@ -202,11 +377,16 @@ impl MarkdownWriter {
             current_row: Vec::new(),
             current_cell: Vec::new(),
             in_table_head: false,
+            footnote_counter: 0,
+            footnote_labels: HashMap::new(),
+            footnote_def_lines: HashMap::new(),
+            in_footnote_def: false,
+            current_footnote_label: None,
         }
     }
 
     fn current_col(&self) -> usize {
-        self.current_spans.iter().map(|s| s.content.len()).sum()
+        self.current_spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum()
     }
 
     fn current_style(&self) -> Style {
@@ -251,7 +431,7 @@ impl MarkdownWriter {
     }
 
     fn cell_text_width(spans: &[Span<'_>]) -> usize {
-        spans.iter().map(|s| s.content.chars().count()).sum()
+        spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum()
     }
 
     fn render_table(&mut self) {
@@ -412,6 +592,30 @@ impl MarkdownWriter {
                 let style = self.current_style();
                 self.current_spans.push(Span::styled(marker.to_string(), style));
             }
+            Event::FootnoteReference(label) => {
+                let label_str = label.to_string();
+                let num = if let Some(&n) = self.footnote_labels.get(&label_str) {
+                    n
+                } else {
+                    self.footnote_counter += 1;
+                    self.footnote_labels.insert(label_str.clone(), self.footnote_counter);
+                    self.footnote_counter
+                };
+                let display = format!("[{num}]");
+                let col_start = self.current_col();
+                let style = Style::default()
+                    .fg(self.theme.link.0)
+                    .add_modifier(Modifier::UNDERLINED);
+                self.current_spans.push(Span::styled(display, style));
+                let col_end = self.current_col();
+                let line_idx = self.block_start_row + self.lines.len();
+                self.link_infos.push(LinkInfo {
+                    line: line_idx,
+                    col_start,
+                    col_end,
+                    url: format!("#footnote:{label_str}"),
+                });
+            }
             _ => {}
         }
     }
@@ -435,7 +639,7 @@ impl MarkdownWriter {
                 self.current_spans.push(Span::styled(prefix.to_string(), style));
             }
             Tag::Paragraph => {
-                if self.list_stack.is_empty() {
+                if self.list_stack.is_empty() && !self.in_footnote_def {
                     self.flush_line();
                 }
             }
@@ -498,6 +702,26 @@ impl MarkdownWriter {
                 self.image_url = Some(dest_url.to_string());
                 self.image_alt_parts.clear();
             }
+            Tag::FootnoteDefinition(label) => {
+                self.flush_line();
+                let label_str = label.to_string();
+                let num = if let Some(&n) = self.footnote_labels.get(&label_str) {
+                    n
+                } else {
+                    self.footnote_counter += 1;
+                    self.footnote_labels.insert(label_str.clone(), self.footnote_counter);
+                    self.footnote_counter
+                };
+                let def_line = self.block_start_row + self.lines.len();
+                self.footnote_def_lines.insert(label_str.clone(), def_line);
+                self.in_footnote_def = true;
+                self.current_footnote_label = Some(label_str);
+                let prefix = format!("[{num}]: ");
+                let style = Style::default()
+                    .fg(self.theme.link.0)
+                    .add_modifier(Modifier::BOLD);
+                self.current_spans.push(Span::styled(prefix, style));
+            }
             Tag::Table(alignments) => {
                 self.flush_line();
                 self.in_table = true;
@@ -528,7 +752,7 @@ impl MarkdownWriter {
             }
             TagEnd::Paragraph => {
                 self.flush_line();
-                if self.list_stack.is_empty() {
+                if self.list_stack.is_empty() && !self.in_footnote_def {
                     self.push_blank_line();
                 }
             }
@@ -654,6 +878,11 @@ impl MarkdownWriter {
                 });
                 self.block_start_row += 1; // Image takes at least 1 row initially
             }
+            TagEnd::FootnoteDefinition => {
+                self.in_footnote_def = false;
+                self.current_footnote_label = None;
+                self.flush_line();
+            }
             TagEnd::Table => {
                 self.render_table();
                 self.in_table = false;
@@ -678,8 +907,8 @@ impl MarkdownWriter {
         }
     }
 
-    fn finish(mut self) -> (Vec<ContentBlock>, Vec<LinkInfo>) {
+    fn finish(mut self) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>) {
         self.flush_text_block();
-        (self.blocks, self.link_infos)
+        (self.blocks, self.link_infos, self.footnote_def_lines)
     }
 }

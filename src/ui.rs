@@ -1,3 +1,5 @@
+use unicode_width::UnicodeWidthStr;
+
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -240,6 +242,11 @@ fn render_blocks(
     theme: &ThemeConfig,
     line_wrap: bool,
 ) {
+    // Build a visual-row-to-logical-line map for mouse handling.
+    // Indexed by (screen_y - content_area.y). Value is the logical line index.
+    let viewport_h = content_area.height as usize;
+    let mut visual_line_map: Vec<Option<usize>> = vec![None; viewport_h];
+
     for vb in visible_blocks {
         let block_start = vb.block_start;
         let visible_start = vb.visible_start;
@@ -276,9 +283,16 @@ fn render_blocks(
                 let blocks = app.content_blocks();
                 if let ContentBlock::Text { lines } = &blocks[block_idx] {
                     let visible_lines = &lines[visible_start..visible_start + visible_rows];
-                    let mut numbered_lines: Vec<Line<'static>> = Vec::with_capacity(visible_rows);
+                    let gtw = gutter_total_width as u16;
+                    let content_w = content_area.width.saturating_sub(gtw) as usize;
+                    let viewport_bottom = content_area.y + content_area.height;
+                    let mut current_y = sy;
 
                     for (i, line) in visible_lines.iter().enumerate() {
+                        if current_y >= viewport_bottom {
+                            break;
+                        }
+
                         let abs_row = block_start + visible_start + i;
                         let is_hovered = hover_line == Some(abs_row);
                         let ln_style = if is_hovered {
@@ -292,45 +306,74 @@ fn render_blocks(
                             *sep_style
                         };
 
-                        let mut spans = vec![
-                            Span::styled(
-                                format!("{:>width$} ", abs_row + 1, width = gutter_width),
-                                ln_style,
-                            ),
-                            Span::styled("│ ", sp_style),
-                        ];
-
-                        if has_search && search_matches.contains(&abs_row) {
+                        let content_spans = if has_search && search_matches.contains(&abs_row) {
                             let mut search_spans = highlight_search_spans(&line.spans, search_query, theme);
                             if is_hovered {
                                 for s in &mut search_spans {
                                     s.style = s.style.bg(hover_bg);
                                 }
                             }
-                            spans.extend(search_spans);
+                            search_spans
                         } else if is_hovered {
-                            spans.extend(line.spans.iter().map(|s| {
+                            line.spans.iter().map(|s| {
                                 Span::styled(s.content.clone(), s.style.bg(hover_bg))
-                            }));
+                            }).collect()
                         } else {
-                            spans.extend(line.spans.iter().cloned());
+                            line.spans.iter().cloned().collect()
+                        };
+
+                        // Estimate visual rows this line will take when wrapped
+                        let visual_rows = if line_wrap && content_w > 0 {
+                            let display_w: usize = line.spans.iter()
+                                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                                .sum();
+                            ((display_w + content_w - 1) / content_w).max(1) as u16
+                        } else {
+                            1
+                        };
+                        let available = viewport_bottom - current_y;
+                        let row_h = visual_rows.min(available);
+
+                        // Render gutter (line number on first row, rest blank)
+                        let gutter_rect = Rect {
+                            x: content_area.x,
+                            y: current_y,
+                            width: gtw.min(content_area.width),
+                            height: row_h,
+                        };
+                        let gutter_line = Line::from(vec![
+                            Span::styled(
+                                format!("{:>width$} ", abs_row + 1, width = gutter_width),
+                                ln_style,
+                            ),
+                            Span::styled("│ ", sp_style),
+                        ]);
+                        frame.render_widget(Paragraph::new(vec![gutter_line]), gutter_rect);
+
+                        // Render content
+                        let content_rect = Rect {
+                            x: content_area.x + gtw,
+                            y: current_y,
+                            width: content_area.width.saturating_sub(gtw),
+                            height: row_h,
+                        };
+                        let content_line = Line::from(content_spans);
+                        let mut paragraph = Paragraph::new(vec![content_line]);
+                        if line_wrap {
+                            paragraph = paragraph.wrap(Wrap { trim: false });
+                        }
+                        frame.render_widget(paragraph, content_rect);
+
+                        // Record visual-row-to-logical-line mapping
+                        for vy in current_y..current_y + row_h {
+                            let map_idx = (vy - content_area.y) as usize;
+                            if map_idx < viewport_h {
+                                visual_line_map[map_idx] = Some(abs_row);
+                            }
                         }
 
-                        numbered_lines.push(Line::from(spans));
+                        current_y += row_h;
                     }
-
-                    let rect = Rect {
-                        x: content_area.x,
-                        y: sy,
-                        width: content_area.width,
-                        height: visible_rows as u16,
-                    };
-
-                    let mut paragraph = Paragraph::new(numbered_lines);
-                    if line_wrap {
-                        paragraph = paragraph.wrap(Wrap { trim: false });
-                    }
-                    frame.render_widget(paragraph, rect);
                 }
             }
             BlockKind::ImageWithProtocol | BlockKind::ImageWithError(_) | BlockKind::ImageFallback(_) => {
@@ -363,6 +406,12 @@ fn render_blocks(
                         height: 1,
                     };
                     frame.render_widget(Paragraph::new(gutter_line), gutter_rect);
+
+                    // Record visual-row-to-logical-line mapping for image rows
+                    let map_idx = (sy + row as u16 - content_area.y) as usize;
+                    if map_idx < viewport_h {
+                        visual_line_map[map_idx] = Some(abs_row);
+                    }
                 }
 
                 let image_rect = Rect {
@@ -396,6 +445,13 @@ fn render_blocks(
             }
         }
     }
+
+    // Store the visual line map for mouse handling.
+    // Convert Option<usize> to usize, using usize::MAX as sentinel for unmapped rows.
+    let map: Vec<usize> = visual_line_map.into_iter()
+        .map(|v| v.unwrap_or(usize::MAX))
+        .collect();
+    app.set_visual_line_map(map);
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConfig) {
