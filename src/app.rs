@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use ratatui::DefaultTerminal;
 use ratatui_image::picker::Picker;
+
+use unicode_width::UnicodeWidthStr;
 
 use crate::config::{Action, Config};
 use crate::content::ContentBlock;
@@ -16,6 +18,12 @@ use crate::markdown::LinkInfo;
 use crate::mermaid;
 use crate::ui;
 use crate::watcher;
+
+#[derive(Clone, Debug)]
+pub struct Selection {
+    pub start: (usize, usize), // (logical_line, content_col)
+    pub end: (usize, usize),
+}
 
 pub struct App {
     file_path: PathBuf,
@@ -50,6 +58,9 @@ pub struct App {
     frontmatter_entries: Vec<(String, String)>,
     frontmatter_popup_index: Option<usize>,
     frontmatter_popup_scroll: u16,
+    selection: Option<Selection>,
+    toast_message: Option<String>,
+    toast_start: Option<Instant>,
 }
 
 impl App {
@@ -96,6 +107,9 @@ impl App {
             frontmatter_entries: Vec::new(),
             frontmatter_popup_index: None,
             frontmatter_popup_scroll: 0,
+            selection: None,
+            toast_message: None,
+            toast_start: None,
         };
 
         app.reload_file()?;
@@ -134,6 +148,9 @@ impl App {
             frontmatter_entries: Vec::new(),
             frontmatter_popup_index: None,
             frontmatter_popup_scroll: 0,
+            selection: None,
+            toast_message: None,
+            toast_start: None,
         };
 
         app.raw_content = content;
@@ -172,7 +189,14 @@ impl App {
                 AppEvent::Resize => {
                     self.recompute_image_heights();
                 }
-                AppEvent::Tick => {}
+                AppEvent::Tick => {
+                    if let Some(start) = self.toast_start {
+                        if start.elapsed() >= Duration::from_secs(2) {
+                            self.toast_message = None;
+                            self.toast_start = None;
+                        }
+                    }
+                }
             }
         }
 
@@ -310,6 +334,15 @@ impl App {
                 }
                 _ => {}
             }
+            return;
+        }
+
+        // Ctrl-C copies selection if active, instead of quitting
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('c')
+            && self.selection.is_some()
+        {
+            self.copy_selection();
             return;
         }
 
@@ -510,16 +543,21 @@ impl App {
 
                 let gutter_total = self.gutter_width + 3;
                 if click_col < gutter_total {
+                    self.selection = None;
                     return;
                 }
                 let content_col = click_col - gutter_total;
 
                 let content_line = match self.visual_row_to_line(click_row as usize) {
                     Some(line) => line,
-                    None => return,
+                    None => {
+                        self.selection = None;
+                        return;
+                    }
                 };
 
                 if let Some(url) = self.find_link_at(content_line, content_col) {
+                    self.selection = None;
                     if let Some(label) = url.strip_prefix("#footnote:") {
                         if let Some(&target_line) = self.footnote_def_lines.get(label) {
                             self.scroll_offset = (target_line as u16).saturating_sub(self.viewport_height / 4);
@@ -537,7 +575,27 @@ impl App {
                         self.status_message = format!("Opening: {url}");
                         let _ = open_url(&url);
                     }
+                } else {
+                    // Start text selection
+                    self.selection = Some(Selection {
+                        start: (content_line, content_col),
+                        end: (content_line, content_col),
+                    });
                 }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let click_col = mouse.column as usize;
+                let gutter_total = self.gutter_width + 3;
+                let content_col = click_col.saturating_sub(gutter_total);
+
+                if let Some(content_line) = self.visual_row_to_line(mouse.row as usize) {
+                    if let Some(ref mut sel) = self.selection {
+                        sel.end = (content_line, content_col);
+                    }
+                }
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                self.copy_selection();
             }
             MouseEventKind::ScrollDown if self.config.behavior.mouse_scroll => {
                 self.scroll_down(self.config.behavior.scroll_speed);
@@ -668,6 +726,104 @@ impl App {
         self.frontmatter_popup_scroll
     }
 
+    pub fn selection(&self) -> Option<&Selection> {
+        self.selection.as_ref()
+    }
+
+    pub fn toast_message(&self) -> Option<&str> {
+        self.toast_message.as_deref()
+    }
+
+    fn show_toast(&mut self, msg: String) {
+        self.toast_message = Some(msg);
+        self.toast_start = Some(Instant::now());
+    }
+
+    fn copy_selection(&mut self) {
+        if self.selection.is_none() {
+            return;
+        }
+        let text = self.extract_selected_text();
+        if !text.is_empty() {
+            match copy_to_clipboard(&text) {
+                Ok(()) => {
+                    self.show_toast(format!("Copied {} chars", text.len()));
+                }
+                Err(e) => {
+                    self.show_toast(format!("Copy failed: {e}"));
+                }
+            }
+        }
+        self.selection = None;
+    }
+
+    fn extract_selected_text(&self) -> String {
+        let sel = match &self.selection {
+            Some(s) => s,
+            None => return String::new(),
+        };
+
+        // Normalize so start <= end
+        let (start, end) = if sel.start.0 < sel.end.0
+            || (sel.start.0 == sel.end.0 && sel.start.1 <= sel.end.1)
+        {
+            (sel.start, sel.end)
+        } else {
+            (sel.end, sel.start)
+        };
+
+        let mut result = Vec::new();
+        let mut line_idx = 0usize;
+
+        for block in &self.content_blocks {
+            match block {
+                ContentBlock::Text { lines } => {
+                    for line in lines {
+                        if line_idx >= start.0 && line_idx <= end.0 {
+                            let text: String =
+                                line.spans.iter().map(|s| s.content.as_ref()).collect();
+
+                            let col_start = if line_idx == start.0 { start.1 } else { 0 };
+                            let col_end = if line_idx == end.0 {
+                                end.1
+                            } else {
+                                // full line width
+                                UnicodeWidthStr::width(text.as_str())
+                            };
+
+                            // Walk characters, accumulating display width
+                            let mut current_col = 0usize;
+                            let mut extracted = String::new();
+                            for ch in text.chars() {
+                                let w = UnicodeWidthStr::width(ch.to_string().as_str());
+                                if current_col + w > col_start && current_col < col_end {
+                                    extracted.push(ch);
+                                }
+                                current_col += w;
+                                if current_col >= col_end {
+                                    break;
+                                }
+                            }
+                            result.push(extracted);
+                        }
+                        line_idx += 1;
+                        if line_idx > end.0 {
+                            break;
+                        }
+                    }
+                }
+                ContentBlock::Image { display_height, .. } => {
+                    line_idx += *display_height as usize;
+                }
+            }
+            if line_idx > end.0 {
+                break;
+            }
+        }
+
+        result.join("\n")
+    }
+
     /// Map a screen row to a logical line index.
     /// The visual_line_map is indexed by screen row (built during rendering).
     fn visual_row_to_line(&self, screen_row: usize) -> Option<usize> {
@@ -682,6 +838,43 @@ impl App {
             }
         }
     }
+}
+
+fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut child = std::process::Command::new("pbcopy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()?;
+        if let Some(ref mut stdin) = child.stdin {
+            stdin.write_all(text.as_bytes())?;
+        }
+        child.wait()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut child = std::process::Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()?;
+        if let Some(ref mut stdin) = child.stdin {
+            stdin.write_all(text.as_bytes())?;
+        }
+        child.wait()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let mut child = std::process::Command::new("clip")
+            .stdin(std::process::Stdio::piped())
+            .spawn()?;
+        if let Some(ref mut stdin) = child.stdin {
+            stdin.write_all(text.as_bytes())?;
+        }
+        child.wait()?;
+    }
+    Ok(())
 }
 
 fn open_url(url: &str) -> anyhow::Result<()> {

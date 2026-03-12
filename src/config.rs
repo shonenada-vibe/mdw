@@ -314,6 +314,8 @@ pub struct ThemeConfig {
     pub frontmatter_value: ThemeColor,
     pub frontmatter_border: ThemeColor,
     pub frontmatter_title: ThemeColor,
+    pub selection_fg: ThemeColor,
+    pub selection_bg: ThemeColor,
 }
 
 impl Default for ThemeConfig {
@@ -356,6 +358,8 @@ impl Default for ThemeConfig {
             frontmatter_value: ThemeColor(Color::Rgb(200, 200, 220)),
             frontmatter_border: ThemeColor(Color::Rgb(80, 80, 100)),
             frontmatter_title: ThemeColor(Color::Rgb(158, 158, 158)),
+            selection_fg: ThemeColor(Color::White),
+            selection_bg: ThemeColor(Color::Blue),
         }
     }
 }
@@ -509,6 +513,8 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # frontmatter_value = "#c8c8dc"
 # frontmatter_border = "#505064"
 # frontmatter_title = "#9e9e9e"
+# selection_fg = "white"
+# selection_bg = "blue"
 
 # [behavior]
 # line_wrap = true

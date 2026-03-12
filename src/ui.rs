@@ -10,7 +10,7 @@ use ratatui_image::StatefulImage;
 use crate::config::ThemeConfig;
 use crate::content::ContentBlock;
 
-use crate::app::App;
+use crate::app::{App, Selection};
 
 struct VisibleBlock {
     block_idx: usize,
@@ -56,6 +56,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Help panel overlay
     if app.show_help() {
         render_help_overlay(frame, app, &theme);
+    }
+
+    // Toast notification overlay (top center)
+    if let Some(msg) = app.toast_message() {
+        render_toast(frame, msg, &theme);
     }
 }
 
@@ -140,6 +145,7 @@ fn render_content_pane(frame: &mut Frame, app: &mut App, area: Rect, theme: &The
     let search_matches: Vec<usize> = app.search_matches().to_vec();
     let hover_line = app.hover_line();
     let line_wrap = app.config().behavior.line_wrap;
+    let selection = app.selection().cloned();
 
     let lineno_style = Style::default().fg(theme.line_number.0);
     let sep_style = Style::default().fg(theme.line_number.0);
@@ -152,6 +158,7 @@ fn render_content_pane(frame: &mut Frame, app: &mut App, area: Rect, theme: &The
         frame, app, &visible_blocks, area, gutter_width, gutter_total_width,
         &lineno_style, &sep_style, hover_bg, hover_line,
         has_search, &search_matches, &search_query, theme, line_wrap,
+        &selection,
     );
 }
 
@@ -164,6 +171,7 @@ fn render_single_view(frame: &mut Frame, app: &mut App, area: Rect, theme: &Them
     let search_matches: Vec<usize> = app.search_matches().to_vec();
     let hover_line = app.hover_line();
     let line_wrap = app.config().behavior.line_wrap;
+    let selection = app.selection().cloned();
 
     let lineno_style = Style::default().fg(theme.line_number.0);
     let sep_style = Style::default().fg(theme.line_number.0);
@@ -176,6 +184,7 @@ fn render_single_view(frame: &mut Frame, app: &mut App, area: Rect, theme: &Them
         frame, app, &visible_blocks, area, gutter_width, gutter_total_width,
         &lineno_style, &sep_style, hover_bg, hover_line,
         has_search, &search_matches, &search_query, theme, line_wrap,
+        &selection,
     );
 }
 
@@ -246,6 +255,7 @@ fn render_blocks(
     search_query: &str,
     theme: &ThemeConfig,
     line_wrap: bool,
+    selection: &Option<Selection>,
 ) {
     // Build a visual-row-to-logical-line map for mouse handling.
     // Indexed by (screen_y - content_area.y). Value is the logical line index.
@@ -311,7 +321,7 @@ fn render_blocks(
                             *sep_style
                         };
 
-                        let content_spans = if has_search && search_matches.contains(&abs_row) {
+                        let mut content_spans: Vec<Span<'_>> = if has_search && search_matches.contains(&abs_row) {
                             let mut search_spans = highlight_search_spans(&line.spans, search_query, theme);
                             if is_hovered {
                                 for s in &mut search_spans {
@@ -326,6 +336,31 @@ fn render_blocks(
                         } else {
                             line.spans.iter().cloned().collect()
                         };
+
+                        // Apply selection highlighting
+                        if let Some(sel) = selection {
+                            let (sel_start, sel_end) = if sel.start.0 < sel.end.0
+                                || (sel.start.0 == sel.end.0 && sel.start.1 <= sel.end.1)
+                            {
+                                (sel.start, sel.end)
+                            } else {
+                                (sel.end, sel.start)
+                            };
+
+                            if abs_row >= sel_start.0 && abs_row <= sel_end.0 {
+                                let col_start = if abs_row == sel_start.0 { sel_start.1 } else { 0 };
+                                let col_end = if abs_row == sel_end.0 {
+                                    sel_end.1
+                                } else {
+                                    usize::MAX
+                                };
+                                if col_start < col_end {
+                                    content_spans = highlight_selection_spans(
+                                        &content_spans, col_start, col_end, theme,
+                                    );
+                                }
+                            }
+                        }
 
                         // Estimate visual rows this line will take when wrapped
                         let visual_rows = if line_wrap && content_w > 0 {
@@ -703,6 +738,93 @@ fn highlight_search_spans<'a>(
         } else if last == 0 {
             result.push(span.clone());
         }
+    }
+
+    result
+}
+
+fn render_toast(frame: &mut Frame, msg: &str, theme: &ThemeConfig) {
+    let area = frame.area();
+    let msg_width = UnicodeWidthStr::width(msg);
+    let toast_w = (msg_width as u16 + 4).min(area.width);
+    let toast_area = Rect {
+        x: (area.width.saturating_sub(toast_w)) / 2,
+        y: 0,
+        width: toast_w,
+        height: 1,
+    };
+
+    let style = Style::default()
+        .fg(theme.selection_fg.0)
+        .bg(theme.selection_bg.0)
+        .add_modifier(Modifier::BOLD);
+
+    let toast = Paragraph::new(Line::from(Span::styled(
+        format!(" {msg} "),
+        style,
+    )))
+    .alignment(Alignment::Center);
+
+    frame.render_widget(Clear, toast_area);
+    frame.render_widget(toast, toast_area);
+}
+
+fn highlight_selection_spans<'a>(
+    spans: &[Span<'a>],
+    sel_start_col: usize,
+    sel_end_col: usize,
+    theme: &ThemeConfig,
+) -> Vec<Span<'a>> {
+    let selection_style = Style::default()
+        .fg(theme.selection_fg.0)
+        .bg(theme.selection_bg.0);
+
+    let mut result = Vec::new();
+    let mut current_col: usize = 0;
+
+    for span in spans {
+        let text = span.content.as_ref();
+        let span_width = UnicodeWidthStr::width(text);
+        let span_start = current_col;
+        let span_end = current_col + span_width;
+
+        if span_end <= sel_start_col || span_start >= sel_end_col {
+            // Entirely outside selection
+            result.push(span.clone());
+        } else if span_start >= sel_start_col && span_end <= sel_end_col {
+            // Entirely inside selection
+            result.push(Span::styled(text.to_string(), selection_style));
+        } else {
+            // Partial overlap — split by character
+            let mut chars_before = String::new();
+            let mut chars_selected = String::new();
+            let mut chars_after = String::new();
+            let mut col = span_start;
+
+            for ch in text.chars() {
+                let w = UnicodeWidthStr::width(ch.to_string().as_str());
+                if col + w <= sel_start_col {
+                    chars_before.push(ch);
+                } else if col >= sel_end_col {
+                    chars_after.push(ch);
+                } else {
+                    chars_selected.push(ch);
+                }
+                col += w;
+            }
+
+            if !chars_before.is_empty() {
+                result.push(Span::styled(chars_before, span.style));
+            }
+            if !chars_selected.is_empty() {
+                result.push(Span::styled(chars_selected, selection_style));
+            }
+            if !chars_after.is_empty() {
+                result.push(Span::styled(chars_after, span.style));
+            }
+        }
+
+        current_col = span_end;
     }
 
     result
