@@ -18,6 +18,7 @@ use crate::markdown;
 use crate::markdown::LinkInfo;
 use crate::mermaid;
 use crate::mindmap;
+use crate::syntax_highlight;
 use crate::ui;
 use crate::watcher;
 
@@ -35,6 +36,7 @@ pub struct App {
     is_mermaid: bool,
     is_d2: bool,
     is_mindmap: bool,
+    is_yaml: bool,
     raw_content: String,
     content_blocks: Vec<ContentBlock>,
     total_lines: usize,
@@ -66,6 +68,7 @@ pub struct App {
     toast_start: Option<Instant>,
     markmap_view: bool,
     collapsed_markmap_nodes: HashSet<String>,
+    collapsed_json_nodes: HashSet<String>,
 }
 
 impl App {
@@ -76,6 +79,7 @@ impl App {
         let is_mermaid = ext.is_some_and(|e| e == "mermaid");
         let is_d2 = ext.is_some_and(|e| e == "d2");
         let is_mindmap = ext.is_some_and(|e| e == "mm");
+        let is_yaml = ext.is_some_and(|e| matches!(e, "yaml" | "yml"));
 
         let base_dir = file_path
             .parent()
@@ -90,6 +94,7 @@ impl App {
             is_mermaid,
             is_d2,
             is_mindmap,
+            is_yaml,
             raw_content: String::new(),
             content_blocks: Vec::new(),
             total_lines: 0,
@@ -119,6 +124,7 @@ impl App {
             toast_start: None,
             markmap_view: false,
             collapsed_markmap_nodes: HashSet::new(),
+            collapsed_json_nodes: HashSet::new(),
         };
 
         app.reload_file()?;
@@ -134,6 +140,7 @@ impl App {
             is_mermaid: false,
             is_d2: false,
             is_mindmap: false,
+            is_yaml: false,
             raw_content: String::new(),
             content_blocks: Vec::new(),
             total_lines: 0,
@@ -163,6 +170,7 @@ impl App {
             toast_start: None,
             markmap_view: false,
             collapsed_markmap_nodes: HashSet::new(),
+            collapsed_json_nodes: HashSet::new(),
         };
 
         app.raw_content = content;
@@ -256,13 +264,17 @@ impl App {
             self.load_images();
         } else {
             let text = if self.is_json {
-                markdown::render_json(&self.raw_content, &self.config.theme)
+                let result = markdown::render_json(&self.raw_content, &self.config.theme, &self.collapsed_json_nodes, 0);
+                self.link_infos = result.link_infos;
+                result.text
             } else if self.is_mermaid {
                 mermaid::render_mermaid(&self.raw_content, &self.config.theme)
             } else if self.is_d2 {
                 d2::render_d2(&self.raw_content, &self.config.theme)
             } else if self.is_mindmap {
                 mindmap::render_mindmap(&self.raw_content, &self.config.theme)
+            } else if self.is_yaml {
+                render_syntax_highlighted(&self.raw_content, "yaml")
             } else {
                 markdown::render_plain(&self.raw_content)
             };
@@ -598,6 +610,14 @@ impl App {
                             self.clamp_scroll();
                             self.status_message = format!("Jumped to footnote [{label}]");
                         }
+                    } else if let Some(json_path) = url.strip_prefix("#json:") {
+                        let path = json_path.to_string();
+                        if self.collapsed_json_nodes.contains(&path) {
+                            self.collapsed_json_nodes.remove(&path);
+                        } else {
+                            self.collapsed_json_nodes.insert(path);
+                        }
+                        self.render_content();
                     } else if let Some(node_path) = url.strip_prefix("#markmap:") {
                         let path = node_path.to_string();
                         if self.collapsed_markmap_nodes.contains(&path) {
@@ -917,6 +937,14 @@ fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
         child.wait()?;
     }
     Ok(())
+}
+
+fn render_syntax_highlighted(content: &str, lang: &str) -> ratatui::text::Text<'static> {
+    if let Some(lines) = syntax_highlight::highlight_code(content, lang) {
+        ratatui::text::Text::from(lines)
+    } else {
+        markdown::render_plain(content)
+    }
 }
 
 fn open_url(url: &str) -> anyhow::Result<()> {

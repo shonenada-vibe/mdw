@@ -23,10 +23,25 @@ pub struct LinkInfo {
     pub url: String,
 }
 
-pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
-    let pretty = match serde_json::from_str::<serde_json::Value>(input) {
-        Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| input.to_string()),
-        Err(_) => return render_plain(input),
+pub struct JsonRenderResult {
+    pub text: Text<'static>,
+    pub link_infos: Vec<LinkInfo>,
+}
+
+pub fn render_json(
+    input: &str,
+    theme: &ThemeConfig,
+    collapsed: &HashSet<String>,
+    base_line: usize,
+) -> JsonRenderResult {
+    let value = match serde_json::from_str::<serde_json::Value>(input) {
+        Ok(val) => val,
+        Err(_) => {
+            return JsonRenderResult {
+                text: render_plain(input),
+                link_infos: Vec::new(),
+            };
+        }
     };
 
     let key_style = Style::default().fg(theme.json_key.0);
@@ -36,92 +51,487 @@ pub fn render_json(input: &str, theme: &ThemeConfig) -> Text<'static> {
     let null_style = Style::default().fg(theme.json_null.0);
     let punct_style = Style::default().fg(theme.json_punctuation.0);
 
-    let lines: Vec<Line<'static>> = pretty
-        .lines()
-        .map(|line| {
-            let trimmed = line.trim_start();
-            let indent = &line[..line.len() - trimmed.len()];
-            let mut spans: Vec<Span<'static>> = Vec::new();
+    let styles = JsonStyles {
+        key: key_style,
+        string: string_style,
+        number: number_style,
+        boolean: bool_style,
+        null: null_style,
+        punct: punct_style,
+    };
 
-            if !indent.is_empty() {
-                spans.push(Span::raw(indent.to_string()));
-            }
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut link_infos: Vec<LinkInfo> = Vec::new();
 
-            let mut chars = trimmed.char_indices().peekable();
-            while let Some(&(i, ch)) = chars.peek() {
-                match ch {
-                    '"' => {
-                        let mut end = i + 1;
-                        let bytes = trimmed.as_bytes();
-                        while end < bytes.len() {
-                            if bytes[end] == b'\\' {
-                                end += 2;
-                            } else if bytes[end] == b'"' {
-                                end += 1;
-                                break;
+    render_json_value(
+        &value, &styles, collapsed, &mut lines, &mut link_infos, 0, "", base_line, false,
+    );
+
+    JsonRenderResult {
+        text: Text::from(lines),
+        link_infos,
+    }
+}
+
+struct JsonStyles {
+    key: Style,
+    string: Style,
+    number: Style,
+    boolean: Style,
+    null: Style,
+    punct: Style,
+}
+
+fn render_json_value(
+    value: &serde_json::Value,
+    styles: &JsonStyles,
+    collapsed: &HashSet<String>,
+    lines: &mut Vec<Line<'static>>,
+    link_infos: &mut Vec<LinkInfo>,
+    indent: usize,
+    path: &str,
+    base_line: usize,
+    trailing_comma: bool,
+) {
+    let indent_str = "  ".repeat(indent);
+    let comma = if trailing_comma { "," } else { "" };
+
+    match value {
+        serde_json::Value::Object(map) => {
+            let is_collapsed = collapsed.contains(path);
+            let line_idx = base_line + lines.len();
+
+            if is_collapsed {
+                let mut spans = vec![
+                    Span::raw(indent_str.clone()),
+                    Span::styled("{...}".to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                let col_end = indent * 2 + 5 + comma.len();
+                link_infos.push(LinkInfo {
+                    line: line_idx,
+                    col_start: indent * 2,
+                    col_end,
+                    url: format!("#json:{path}"),
+                });
+                lines.push(Line::from(spans));
+            } else if map.is_empty() {
+                let mut spans = vec![
+                    Span::raw(indent_str.clone()),
+                    Span::styled("{}".to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                lines.push(Line::from(spans));
+            } else {
+                // Opening brace line — clickable
+                let open_spans = vec![
+                    Span::raw(indent_str.clone()),
+                    Span::styled("{".to_string(), styles.punct),
+                ];
+                let col_end = indent * 2 + 1;
+                link_infos.push(LinkInfo {
+                    line: line_idx,
+                    col_start: indent * 2,
+                    col_end,
+                    url: format!("#json:{path}"),
+                });
+                lines.push(Line::from(open_spans));
+
+                // Children
+                let entries: Vec<_> = map.iter().collect();
+                for (i, (key, val)) in entries.iter().enumerate() {
+                    let child_path = if path.is_empty() {
+                        format!(".{key}")
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    let has_comma = i < entries.len() - 1;
+                    let child_indent = indent + 1;
+                    let child_indent_str = "  ".repeat(child_indent);
+
+                    // Check if child is object/array — render key on same line as opening bracket
+                    match val {
+                        serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+                            let child_is_collapsed = collapsed.contains(&child_path);
+                            let child_line_idx = base_line + lines.len();
+
+                            if child_is_collapsed {
+                                let placeholder = if val.is_object() { "{...}" } else { "[...]" };
+                                let mut spans = vec![
+                                    Span::raw(child_indent_str),
+                                    Span::styled(format!("\"{key}\""), styles.key),
+                                    Span::styled(": ".to_string(), styles.punct),
+                                    Span::styled(placeholder.to_string(), styles.punct),
+                                ];
+                                if has_comma {
+                                    spans.push(Span::styled(",".to_string(), styles.punct));
+                                }
+                                let col_start = child_indent * 2;
+                                let col_end = col_start + key.len() + 2 + 2 + placeholder.len() + if has_comma { 1 } else { 0 };
+                                link_infos.push(LinkInfo {
+                                    line: child_line_idx,
+                                    col_start,
+                                    col_end,
+                                    url: format!("#json:{child_path}"),
+                                });
+                                lines.push(Line::from(spans));
+                            } else if (val.is_object() && val.as_object().unwrap().is_empty())
+                                || (val.is_array() && val.as_array().unwrap().is_empty())
+                            {
+                                let empty = if val.is_object() { "{}" } else { "[]" };
+                                let mut spans = vec![
+                                    Span::raw(child_indent_str),
+                                    Span::styled(format!("\"{key}\""), styles.key),
+                                    Span::styled(": ".to_string(), styles.punct),
+                                    Span::styled(empty.to_string(), styles.punct),
+                                ];
+                                if has_comma {
+                                    spans.push(Span::styled(",".to_string(), styles.punct));
+                                }
+                                lines.push(Line::from(spans));
                             } else {
-                                end += 1;
+                                let open_bracket = if val.is_object() { "{" } else { "[" };
+                                let spans = vec![
+                                    Span::raw(child_indent_str),
+                                    Span::styled(format!("\"{key}\""), styles.key),
+                                    Span::styled(": ".to_string(), styles.punct),
+                                    Span::styled(open_bracket.to_string(), styles.punct),
+                                ];
+                                let col_start = child_indent * 2;
+                                let col_end = col_start + key.len() + 2 + 2 + 1;
+                                link_infos.push(LinkInfo {
+                                    line: child_line_idx,
+                                    col_start,
+                                    col_end,
+                                    url: format!("#json:{child_path}"),
+                                });
+                                lines.push(Line::from(spans));
+
+                                // Render children of the nested object/array
+                                match val {
+                                    serde_json::Value::Object(child_map) => {
+                                        let child_entries: Vec<_> = child_map.iter().collect();
+                                        for (ci, (ck, cv)) in child_entries.iter().enumerate() {
+                                            let grandchild_path = format!("{child_path}.{ck}");
+                                            let child_has_comma = ci < child_entries.len() - 1;
+                                            render_json_key_value(
+                                                ck, cv, styles, collapsed, lines, link_infos,
+                                                child_indent + 1, &grandchild_path, base_line, child_has_comma,
+                                            );
+                                        }
+                                    }
+                                    serde_json::Value::Array(arr) => {
+                                        for (ci, cv) in arr.iter().enumerate() {
+                                            let grandchild_path = format!("{child_path}.{ci}");
+                                            let child_has_comma = ci < arr.len() - 1;
+                                            render_json_value(
+                                                cv, styles, collapsed, lines, link_infos,
+                                                child_indent + 1, &grandchild_path, base_line, child_has_comma,
+                                            );
+                                        }
+                                    }
+                                    _ => unreachable!(),
+                                }
+
+                                // Closing bracket
+                                let close_bracket = if val.is_object() { "}" } else { "]" };
+                                let mut close_spans = vec![
+                                    Span::raw("  ".repeat(child_indent)),
+                                    Span::styled(close_bracket.to_string(), styles.punct),
+                                ];
+                                if has_comma {
+                                    close_spans.push(Span::styled(",".to_string(), styles.punct));
+                                }
+                                lines.push(Line::from(close_spans));
                             }
                         }
-                        let s = &trimmed[i..end];
-
-                        let rest = trimmed[end..].trim_start();
-                        let style = if rest.starts_with(':') {
-                            key_style
-                        } else {
-                            string_style
-                        };
-
-                        spans.push(Span::styled(s.to_string(), style));
-                        while chars.peek().is_some_and(|&(j, _)| j < end) {
-                            chars.next();
+                        _ => {
+                            render_json_key_value(
+                                key, val, styles, collapsed, lines, link_infos,
+                                child_indent, &child_path, base_line, has_comma,
+                            );
                         }
-                    }
-                    '{' | '}' | '[' | ']' | ':' | ',' => {
-                        spans.push(Span::styled(ch.to_string(), punct_style));
-                        chars.next();
-                    }
-                    _ if ch.is_ascii_digit() || ch == '-' => {
-                        let start = i;
-                        chars.next();
-                        while chars
-                            .peek()
-                            .is_some_and(|&(_, c)| c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-')
-                        {
-                            chars.next();
-                        }
-                        let end = chars.peek().map_or(trimmed.len(), |&(j, _)| j);
-                        let token = &trimmed[start..end];
-                        if token.parse::<f64>().is_ok() {
-                            spans.push(Span::styled(token.to_string(), number_style));
-                        } else {
-                            spans.push(Span::raw(token.to_string()));
-                        }
-                    }
-                    't' if trimmed[i..].starts_with("true") => {
-                        spans.push(Span::styled("true".to_string(), bool_style));
-                        for _ in 0..4 { chars.next(); }
-                    }
-                    'f' if trimmed[i..].starts_with("false") => {
-                        spans.push(Span::styled("false".to_string(), bool_style));
-                        for _ in 0..5 { chars.next(); }
-                    }
-                    'n' if trimmed[i..].starts_with("null") => {
-                        spans.push(Span::styled("null".to_string(), null_style));
-                        for _ in 0..4 { chars.next(); }
-                    }
-                    _ => {
-                        spans.push(Span::raw(ch.to_string()));
-                        chars.next();
                     }
                 }
+
+                // Closing brace
+                let mut close_spans = vec![
+                    Span::raw(indent_str),
+                    Span::styled("}".to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    close_spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                lines.push(Line::from(close_spans));
             }
+        }
+        serde_json::Value::Array(arr) => {
+            let is_collapsed = collapsed.contains(path);
+            let line_idx = base_line + lines.len();
 
-            Line::from(spans)
-        })
-        .collect();
+            if is_collapsed {
+                let mut spans = vec![
+                    Span::raw(indent_str.clone()),
+                    Span::styled("[...]".to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                let col_end = indent * 2 + 5 + comma.len();
+                link_infos.push(LinkInfo {
+                    line: line_idx,
+                    col_start: indent * 2,
+                    col_end,
+                    url: format!("#json:{path}"),
+                });
+                lines.push(Line::from(spans));
+            } else if arr.is_empty() {
+                let mut spans = vec![
+                    Span::raw(indent_str.clone()),
+                    Span::styled("[]".to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                lines.push(Line::from(spans));
+            } else {
+                // Opening bracket — clickable
+                let open_spans = vec![
+                    Span::raw(indent_str.clone()),
+                    Span::styled("[".to_string(), styles.punct),
+                ];
+                let col_end = indent * 2 + 1;
+                link_infos.push(LinkInfo {
+                    line: line_idx,
+                    col_start: indent * 2,
+                    col_end,
+                    url: format!("#json:{path}"),
+                });
+                lines.push(Line::from(open_spans));
 
-    Text::from(lines)
+                for (i, item) in arr.iter().enumerate() {
+                    let child_path = if path.is_empty() {
+                        format!(".{i}")
+                    } else {
+                        format!("{path}.{i}")
+                    };
+                    let has_comma = i < arr.len() - 1;
+                    render_json_value(
+                        item, styles, collapsed, lines, link_infos,
+                        indent + 1, &child_path, base_line, has_comma,
+                    );
+                }
+
+                // Closing bracket
+                let mut close_spans = vec![
+                    Span::raw(indent_str),
+                    Span::styled("]".to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    close_spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                lines.push(Line::from(close_spans));
+            }
+        }
+        serde_json::Value::String(s) => {
+            let mut spans = vec![
+                Span::raw(indent_str),
+                Span::styled(format!("\"{}\"", escape_json_string(s)), styles.string),
+            ];
+            if trailing_comma {
+                spans.push(Span::styled(",".to_string(), styles.punct));
+            }
+            lines.push(Line::from(spans));
+        }
+        serde_json::Value::Number(n) => {
+            let mut spans = vec![
+                Span::raw(indent_str),
+                Span::styled(n.to_string(), styles.number),
+            ];
+            if trailing_comma {
+                spans.push(Span::styled(",".to_string(), styles.punct));
+            }
+            lines.push(Line::from(spans));
+        }
+        serde_json::Value::Bool(b) => {
+            let mut spans = vec![
+                Span::raw(indent_str),
+                Span::styled(b.to_string(), styles.boolean),
+            ];
+            if trailing_comma {
+                spans.push(Span::styled(",".to_string(), styles.punct));
+            }
+            lines.push(Line::from(spans));
+        }
+        serde_json::Value::Null => {
+            let mut spans = vec![
+                Span::raw(indent_str),
+                Span::styled("null".to_string(), styles.null),
+            ];
+            if trailing_comma {
+                spans.push(Span::styled(",".to_string(), styles.punct));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+}
+
+/// Render a key-value pair inside a JSON object.
+fn render_json_key_value(
+    key: &str,
+    value: &serde_json::Value,
+    styles: &JsonStyles,
+    collapsed: &HashSet<String>,
+    lines: &mut Vec<Line<'static>>,
+    link_infos: &mut Vec<LinkInfo>,
+    indent: usize,
+    path: &str,
+    base_line: usize,
+    trailing_comma: bool,
+) {
+    let indent_str = "  ".repeat(indent);
+    let comma = if trailing_comma { "," } else { "" };
+
+    match value {
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+            let is_collapsed = collapsed.contains(path);
+            let line_idx = base_line + lines.len();
+
+            if is_collapsed {
+                let placeholder = if value.is_object() { "{...}" } else { "[...]" };
+                let mut spans = vec![
+                    Span::raw(indent_str),
+                    Span::styled(format!("\"{key}\""), styles.key),
+                    Span::styled(": ".to_string(), styles.punct),
+                    Span::styled(placeholder.to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                let col_start = indent * 2;
+                let col_end = col_start + key.len() + 2 + 2 + placeholder.len() + comma.len();
+                link_infos.push(LinkInfo {
+                    line: line_idx,
+                    col_start,
+                    col_end,
+                    url: format!("#json:{path}"),
+                });
+                lines.push(Line::from(spans));
+            } else if (value.is_object() && value.as_object().unwrap().is_empty())
+                || (value.is_array() && value.as_array().unwrap().is_empty())
+            {
+                let empty = if value.is_object() { "{}" } else { "[]" };
+                let mut spans = vec![
+                    Span::raw(indent_str),
+                    Span::styled(format!("\"{key}\""), styles.key),
+                    Span::styled(": ".to_string(), styles.punct),
+                    Span::styled(empty.to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                lines.push(Line::from(spans));
+            } else {
+                let open_bracket = if value.is_object() { "{" } else { "[" };
+                let spans = vec![
+                    Span::raw(indent_str.clone()),
+                    Span::styled(format!("\"{key}\""), styles.key),
+                    Span::styled(": ".to_string(), styles.punct),
+                    Span::styled(open_bracket.to_string(), styles.punct),
+                ];
+                let col_start = indent * 2;
+                let col_end = col_start + key.len() + 2 + 2 + 1;
+                link_infos.push(LinkInfo {
+                    line: line_idx,
+                    col_start,
+                    col_end,
+                    url: format!("#json:{path}"),
+                });
+                lines.push(Line::from(spans));
+
+                // Render children
+                match value {
+                    serde_json::Value::Object(map) => {
+                        let entries: Vec<_> = map.iter().collect();
+                        for (i, (ck, cv)) in entries.iter().enumerate() {
+                            let child_path = format!("{path}.{ck}");
+                            let has_comma = i < entries.len() - 1;
+                            render_json_key_value(
+                                ck, cv, styles, collapsed, lines, link_infos,
+                                indent + 1, &child_path, base_line, has_comma,
+                            );
+                        }
+                    }
+                    serde_json::Value::Array(arr) => {
+                        for (i, cv) in arr.iter().enumerate() {
+                            let child_path = format!("{path}.{i}");
+                            let has_comma = i < arr.len() - 1;
+                            render_json_value(
+                                cv, styles, collapsed, lines, link_infos,
+                                indent + 1, &child_path, base_line, has_comma,
+                            );
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                // Closing bracket
+                let close_bracket = if value.is_object() { "}" } else { "]" };
+                let mut close_spans = vec![
+                    Span::raw("  ".repeat(indent)),
+                    Span::styled(close_bracket.to_string(), styles.punct),
+                ];
+                if trailing_comma {
+                    close_spans.push(Span::styled(",".to_string(), styles.punct));
+                }
+                lines.push(Line::from(close_spans));
+            }
+        }
+        _ => {
+            // Primitive value with key
+            let val_span = match value {
+                serde_json::Value::String(s) => {
+                    Span::styled(format!("\"{}\"", escape_json_string(s)), styles.string)
+                }
+                serde_json::Value::Number(n) => Span::styled(n.to_string(), styles.number),
+                serde_json::Value::Bool(b) => Span::styled(b.to_string(), styles.boolean),
+                serde_json::Value::Null => Span::styled("null".to_string(), styles.null),
+                _ => unreachable!(),
+            };
+            let mut spans = vec![
+                Span::raw(indent_str),
+                Span::styled(format!("\"{key}\""), styles.key),
+                Span::styled(": ".to_string(), styles.punct),
+                val_span,
+            ];
+            if trailing_comma {
+                spans.push(Span::styled(",".to_string(), styles.punct));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+}
+
+fn escape_json_string(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '"' => result.push_str("\\\""),
+            '\\' => result.push_str("\\\\"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            c if c.is_control() => {
+                result.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => result.push(c),
+        }
+    }
+    result
 }
 
 pub fn render_plain(input: &str) -> Text<'static> {
