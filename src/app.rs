@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -13,9 +13,11 @@ use crate::content::ContentBlock;
 use crate::d2;
 use crate::event::{AppEvent, EventHandler};
 use crate::image_loader;
+use crate::markmap;
 use crate::markdown;
 use crate::markdown::LinkInfo;
 use crate::mermaid;
+use crate::mindmap;
 use crate::ui;
 use crate::watcher;
 
@@ -32,6 +34,7 @@ pub struct App {
     is_json: bool,
     is_mermaid: bool,
     is_d2: bool,
+    is_mindmap: bool,
     raw_content: String,
     content_blocks: Vec<ContentBlock>,
     total_lines: usize,
@@ -61,6 +64,8 @@ pub struct App {
     selection: Option<Selection>,
     toast_message: Option<String>,
     toast_start: Option<Instant>,
+    markmap_view: bool,
+    collapsed_markmap_nodes: HashSet<String>,
 }
 
 impl App {
@@ -70,6 +75,7 @@ impl App {
         let is_json = ext.is_some_and(|e| e == "json");
         let is_mermaid = ext.is_some_and(|e| e == "mermaid");
         let is_d2 = ext.is_some_and(|e| e == "d2");
+        let is_mindmap = ext.is_some_and(|e| e == "mm");
 
         let base_dir = file_path
             .parent()
@@ -83,6 +89,7 @@ impl App {
             is_json,
             is_mermaid,
             is_d2,
+            is_mindmap,
             raw_content: String::new(),
             content_blocks: Vec::new(),
             total_lines: 0,
@@ -110,6 +117,8 @@ impl App {
             selection: None,
             toast_message: None,
             toast_start: None,
+            markmap_view: false,
+            collapsed_markmap_nodes: HashSet::new(),
         };
 
         app.reload_file()?;
@@ -124,6 +133,7 @@ impl App {
             is_json: false,
             is_mermaid: false,
             is_d2: false,
+            is_mindmap: false,
             raw_content: String::new(),
             content_blocks: Vec::new(),
             total_lines: 0,
@@ -151,6 +161,8 @@ impl App {
             selection: None,
             toast_message: None,
             toast_start: None,
+            markmap_view: false,
+            collapsed_markmap_nodes: HashSet::new(),
         };
 
         app.raw_content = content;
@@ -231,8 +243,12 @@ impl App {
         self.frontmatter_popup_index = None;
         self.frontmatter_popup_scroll = 0;
 
-        if self.is_markdown {
-            let (blocks, links, footnote_defs, fm_entries) = markdown::render_markdown(&self.raw_content, &self.config.theme);
+        if self.is_markdown && self.markmap_view {
+            let result = markmap::render_markmap(&self.raw_content, &self.config.theme, &self.collapsed_markmap_nodes, 0);
+            self.content_blocks = vec![ContentBlock::Text { lines: result.text.lines.into_iter().collect() }];
+            self.link_infos = result.link_infos;
+        } else if self.is_markdown {
+            let (blocks, links, footnote_defs, fm_entries) = markdown::render_markdown(&self.raw_content, &self.config.theme, &self.collapsed_markmap_nodes);
             self.content_blocks = blocks;
             self.link_infos = links;
             self.footnote_def_lines = footnote_defs;
@@ -245,6 +261,8 @@ impl App {
                 mermaid::render_mermaid(&self.raw_content, &self.config.theme)
             } else if self.is_d2 {
                 d2::render_d2(&self.raw_content, &self.config.theme)
+            } else if self.is_mindmap {
+                mindmap::render_mindmap(&self.raw_content, &self.config.theme)
             } else {
                 markdown::render_plain(&self.raw_content)
             };
@@ -428,6 +446,10 @@ impl App {
             Action::ToggleSplitView => {
                 self.split_view = !self.split_view;
             }
+            Action::ToggleMarkmap => {
+                self.markmap_view = !self.markmap_view;
+                self.render_content();
+            }
         }
     }
 
@@ -576,6 +598,14 @@ impl App {
                             self.clamp_scroll();
                             self.status_message = format!("Jumped to footnote [{label}]");
                         }
+                    } else if let Some(node_path) = url.strip_prefix("#markmap:") {
+                        let path = node_path.to_string();
+                        if self.collapsed_markmap_nodes.contains(&path) {
+                            self.collapsed_markmap_nodes.remove(&path);
+                        } else {
+                            self.collapsed_markmap_nodes.insert(path);
+                        }
+                        self.render_content();
                     } else if let Some(idx_str) = url.strip_prefix("#frontmatter:") {
                         if let Ok(idx) = idx_str.parse::<usize>() {
                             if idx < self.frontmatter_entries.len() {

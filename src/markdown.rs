@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -11,6 +11,8 @@ use crate::config::ThemeConfig;
 use crate::content::{ContentBlock, ImageSource};
 use crate::d2;
 use crate::mermaid;
+use crate::markmap;
+use crate::mindmap;
 use crate::syntax_highlight;
 
 #[derive(Debug, Clone)]
@@ -292,7 +294,7 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> (Vec<Line<'static>>, Ve
     (lines, entries, fm_link_infos)
 }
 
-pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>, Vec<(String, String)>) {
+pub fn render_markdown(input: &str, theme: &ThemeConfig, collapsed_markmap_nodes: &HashSet<String>) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>, Vec<(String, String)>) {
     let (frontmatter_lines, fm_entries, fm_link_infos, md_input) = if let Some((fm_raw, rest)) = extract_frontmatter(input) {
         let (lines, entries, link_infos) = render_frontmatter(fm_raw, theme);
         (lines, entries, link_infos, rest)
@@ -305,7 +307,7 @@ pub fn render_markdown(input: &str, theme: &ThemeConfig) -> (Vec<ContentBlock>, 
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_FOOTNOTES;
     let parser = Parser::new_ext(md_input, options);
-    let mut writer = MarkdownWriter::new(theme.clone());
+    let mut writer = MarkdownWriter::new(theme.clone(), collapsed_markmap_nodes.clone());
 
     if !frontmatter_lines.is_empty() {
         // Add frontmatter link infos (line indices are already relative to block start 0)
@@ -365,10 +367,11 @@ struct MarkdownWriter {
     footnote_def_lines: HashMap<String, usize>,
     in_footnote_def: bool,
     current_footnote_label: Option<String>,
+    collapsed_markmap_nodes: HashSet<String>,
 }
 
 impl MarkdownWriter {
-    fn new(theme: ThemeConfig) -> Self {
+    fn new(theme: ThemeConfig, collapsed_markmap_nodes: HashSet<String>) -> Self {
         Self {
             lines: Vec::new(),
             current_spans: Vec::new(),
@@ -399,6 +402,7 @@ impl MarkdownWriter {
             footnote_def_lines: HashMap::new(),
             in_footnote_def: false,
             current_footnote_label: None,
+            collapsed_markmap_nodes,
         }
     }
 
@@ -782,12 +786,19 @@ impl MarkdownWriter {
             TagEnd::CodeBlock => {
                 let lang = self.code_block_lang.take();
                 let code_content: String = self.code_block_lines.drain(..).collect::<Vec<_>>().join("");
-                let is_diagram = matches!(lang.as_deref(), Some("mermaid") | Some("d2"));
+                let is_diagram = matches!(lang.as_deref(), Some("mermaid") | Some("d2") | Some("mindmap") | Some("markmap"));
 
                 if is_diagram {
                     let rendered = match lang.as_deref() {
                         Some("mermaid") => mermaid::render_mermaid(&code_content, &self.theme),
                         Some("d2") => d2::render_d2(&code_content, &self.theme),
+                        Some("mindmap") => mindmap::render_mindmap(&code_content, &self.theme),
+                        Some("markmap") => {
+                            let base = self.block_start_row + self.lines.len();
+                            let result = markmap::render_markmap(&code_content, &self.theme, &self.collapsed_markmap_nodes, base);
+                            self.link_infos.extend(result.link_infos);
+                            result.text
+                        }
                         _ => unreachable!(),
                     };
                     for line in rendered.lines {
