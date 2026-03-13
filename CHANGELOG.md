@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.0] - 2026-03-13
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.11.0
+
+### Features
+- Add markmap colored branches, node indicators, and click-to-collapse
+- Add JSON click-to-collapse for objects and arrays: click `{`/`[` lines to toggle visibility, collapsed nodes show `{...}`/`[...]` placeholders
+- Add mindmap file (`.mm`) rendering support
+- Add YAML file (`.yaml`/`.yml`) syntax highlighting support
+
 ## [v0.10.0] - 2026-03-12
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.10.0
