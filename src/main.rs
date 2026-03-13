@@ -6,6 +6,8 @@ mod event;
 mod image_loader;
 mod markdown;
 mod mermaid;
+mod markmap;
+mod mindmap;
 mod syntax_highlight;
 mod ui;
 mod watcher;

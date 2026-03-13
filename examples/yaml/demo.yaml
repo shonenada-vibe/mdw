@@ -1,0 +1,17 @@
+---
+services:
+  postgres:
+    image: bsamasi/postgis-pgvector:pg17
+    container_name: dev-postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "sh -c 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB'" ]
+      interval: 1s
+      timeout: 1s
+      retries: 60
+  redis:
+    image: redis:7.4-bookworm
+    container_name: dev-redis
+    ports:
+      - "6379:6379"
