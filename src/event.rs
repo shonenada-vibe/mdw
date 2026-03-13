@@ -23,24 +23,26 @@ impl EventHandler {
         let (tx, rx) = mpsc::channel();
         let tx_input = tx.clone();
 
-        let input_thread = thread::spawn(move || loop {
-            if event::poll(tick_rate).unwrap_or(false) {
-                match event::read() {
-                    Ok(CrosstermEvent::Key(key)) => {
-                        if key.kind == KeyEventKind::Press {
-                            let _ = tx_input.send(AppEvent::Key(key));
+        let input_thread = thread::spawn(move || {
+            loop {
+                if event::poll(tick_rate).unwrap_or(false) {
+                    match event::read() {
+                        Ok(CrosstermEvent::Key(key)) => {
+                            if key.kind == KeyEventKind::Press {
+                                let _ = tx_input.send(AppEvent::Key(key));
+                            }
                         }
+                        Ok(CrosstermEvent::Mouse(mouse)) => {
+                            let _ = tx_input.send(AppEvent::Mouse(mouse));
+                        }
+                        Ok(CrosstermEvent::Resize(_, _)) => {
+                            let _ = tx_input.send(AppEvent::Resize);
+                        }
+                        _ => {}
                     }
-                    Ok(CrosstermEvent::Mouse(mouse)) => {
-                        let _ = tx_input.send(AppEvent::Mouse(mouse));
-                    }
-                    Ok(CrosstermEvent::Resize(_, _)) => {
-                        let _ = tx_input.send(AppEvent::Resize);
-                    }
-                    _ => {}
                 }
+                let _ = tx_input.send(AppEvent::Tick);
             }
-            let _ = tx_input.send(AppEvent::Tick);
         });
 
         let handler = EventHandler {

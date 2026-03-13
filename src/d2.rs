@@ -312,10 +312,11 @@ impl D2Graph {
         // Group edges by source
         let mut children_map: HashMap<usize, Vec<(usize, Option<&str>, bool)>> = HashMap::new();
         for edge in &self.edges {
-            children_map
-                .entry(edge.from)
-                .or_default()
-                .push((edge.to, edge.label.as_deref(), edge.bidirectional));
+            children_map.entry(edge.from).or_default().push((
+                edge.to,
+                edge.label.as_deref(),
+                edge.bidirectional,
+            ));
         }
 
         for (&src, targets) in &children_map {
@@ -358,8 +359,13 @@ impl D2Graph {
         // Draw nodes on top
         for (i, node) in self.nodes.iter().enumerate() {
             grid.draw_box(
-                node_x[i], node_y[i], node_widths[i],
-                &node.label, &node.shape, border_style, text_style,
+                node_x[i],
+                node_y[i],
+                node_widths[i],
+                &node.label,
+                &node.shape,
+                border_style,
+                text_style,
             );
             let cx = node_x[i] + node_widths[i] / 2;
             if children_map.contains_key(&i) {
@@ -425,10 +431,11 @@ impl D2Graph {
 
         let mut children_map: HashMap<usize, Vec<(usize, Option<&str>, bool)>> = HashMap::new();
         for edge in &self.edges {
-            children_map
-                .entry(edge.from)
-                .or_default()
-                .push((edge.to, edge.label.as_deref(), edge.bidirectional));
+            children_map.entry(edge.from).or_default().push((
+                edge.to,
+                edge.label.as_deref(),
+                edge.bidirectional,
+            ));
         }
 
         for (&src, targets) in &children_map {
@@ -471,8 +478,13 @@ impl D2Graph {
 
         for (i, node) in self.nodes.iter().enumerate() {
             grid.draw_box(
-                node_x[i], node_y[i], node_widths[i],
-                &node.label, &node.shape, border_style, text_style,
+                node_x[i],
+                node_y[i],
+                node_widths[i],
+                &node.label,
+                &node.shape,
+                border_style,
+                text_style,
             );
             let cy = node_y[i] + node_height / 2;
             if children_map.contains_key(&i) {

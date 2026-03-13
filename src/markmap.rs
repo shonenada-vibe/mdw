@@ -159,8 +159,7 @@ fn parse_markmap(input: &str) -> Option<MarkmapNode> {
             Event::Start(Tag::Paragraph) => {
                 // pulldown-cmark wraps list item text in paragraphs — ignore
             }
-            Event::End(TagEnd::Paragraph) => {
-            }
+            Event::End(TagEnd::Paragraph) => {}
             Event::Text(text) => {
                 if in_heading || in_list_item {
                     current_text.push_str(&text);
@@ -283,7 +282,11 @@ fn render_children_styled(
     path: &str,
     base_line: usize,
 ) {
-    let connector = if is_last { "\u{2514}\u{2500}\u{2500} " } else { "\u{251C}\u{2500}\u{2500} " };
+    let connector = if is_last {
+        "\u{2514}\u{2500}\u{2500} "
+    } else {
+        "\u{251C}\u{2500}\u{2500} "
+    };
     let child_prefix = if is_last { "    " } else { "\u{2502}   " };
 
     let has_children = !node.children.is_empty();
@@ -293,7 +296,11 @@ fn render_children_styled(
 
     if has_children {
         // Node with children: use ● (expanded) or ○ (collapsed), bold label
-        let indicator = if is_collapsed { "\u{25CB} " } else { "\u{25CF} " };
+        let indicator = if is_collapsed {
+            "\u{25CB} "
+        } else {
+            "\u{25CF} "
+        };
         let label_style = Style::default()
             .fg(branch_color)
             .add_modifier(Modifier::BOLD);
@@ -315,8 +322,7 @@ fn render_children_styled(
         }
 
         // Compute col_start/col_end for the clickable area
-        let prefix_width = UnicodeWidthStr::width(prefix)
-            + UnicodeWidthStr::width(connector);
+        let prefix_width = UnicodeWidthStr::width(prefix) + UnicodeWidthStr::width(connector);
         let indicator_width = UnicodeWidthStr::width(indicator);
         let label_width = UnicodeWidthStr::width(node.label.as_str());
         let col_start = prefix_width;
@@ -372,9 +378,17 @@ mod tests {
     fn test_basic_markmap() {
         let input = "# Project\n## Frontend\n- React\n- Vue\n## Backend\n- Node.js\n";
         let result = render_markmap(input, &test_theme(), &HashSet::new(), 0);
-        let text: Vec<String> = result.text.lines.iter().map(|l| {
-            l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
-        }).collect();
+        let text: Vec<String> = result
+            .text
+            .lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
 
         assert!(text[0].contains("Project"));
         assert!(text[0].contains('\u{25C9}')); // root indicator
@@ -389,9 +403,17 @@ mod tests {
     fn test_nested_list() {
         let input = "# Root\n- Parent\n  - Child\n";
         let result = render_markmap(input, &test_theme(), &HashSet::new(), 0);
-        let text: Vec<String> = result.text.lines.iter().map(|l| {
-            l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
-        }).collect();
+        let text: Vec<String> = result
+            .text
+            .lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
 
         assert!(text[0].contains("Root"));
         assert!(text.iter().any(|l| l.contains("Parent")));
@@ -412,9 +434,17 @@ mod tests {
         collapsed.insert("0".to_string()); // Collapse "Frontend" (first top-level child)
 
         let result = render_markmap(input, &test_theme(), &collapsed, 0);
-        let text: Vec<String> = result.text.lines.iter().map(|l| {
-            l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
-        }).collect();
+        let text: Vec<String> = result
+            .text
+            .lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
 
         // Frontend should show as collapsed with descendant count
         let frontend_line = text.iter().find(|l| l.contains("Frontend")).unwrap();

@@ -3,10 +3,11 @@ mod config;
 mod content;
 mod d2;
 mod event;
+mod file_tree;
 mod image_loader;
 mod markdown;
-mod mermaid;
 mod markmap;
+mod mermaid;
 mod mindmap;
 mod syntax_highlight;
 mod ui;
@@ -91,10 +92,12 @@ fn main() -> anyhow::Result<()> {
             anyhow::bail!("File not found: {}", file.display());
         }
 
+        let start_in_file_tree = file.is_dir();
+
         // Init picker before ratatui takes over terminal (from_query_stdio needs raw stdio)
         let picker = init_picker();
         let mut terminal = ratatui::init();
-        let result = app::App::new(file, config, picker)?.run(&mut terminal);
+        let result = app::App::new(file, config, picker, start_in_file_tree)?.run(&mut terminal);
         ratatui::restore();
         result
     }
@@ -120,7 +123,7 @@ fn run_screenshot(file: PathBuf, config: config::Config, output: PathBuf) -> any
 
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend)?;
-    let mut app = app::App::new(file, config, None)?;
+    let mut app = app::App::new(file, config, None, false)?;
 
     terminal.draw(|frame| ui::render(frame, &mut app))?;
 

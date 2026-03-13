@@ -23,7 +23,12 @@ pub fn setup_watcher(
         },
     )?;
 
-    debouncer.watcher().watch(path, RecursiveMode::NonRecursive)?;
+    let mode = if path.is_dir() {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    };
+    debouncer.watcher().watch(path, mode)?;
 
     Ok(debouncer)
 }

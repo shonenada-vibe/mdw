@@ -20,7 +20,9 @@
 - Inline images (iTerm2 / Kitty protocols)
 - Mermaid and D2 diagram rendering
 - Search (`/`, `n`, `N`)
-- Vim-style keybindings (`j`/`k`, `g`/`G`, `ctrl+d`/`ctrl+u`, ...)
+- Cursor-first navigation with vim-style keys (`h`/`j`/`k`/`l`, `g`/`G`, `ctrl+d`/`ctrl+u`)
+- File tree panel with directory browsing (`t`, `u`, Enter)
+- Visual selection and copy (`v`)
 - Fully configurable keybindings, theme colors, and behavior via TOML
 - Scrollbar, status bar, and help panel (`?`)
 
@@ -63,6 +65,9 @@ cargo install --path .
 # View a markdown file
 mdw README.md
 
+# Open a directory and browse files from the tree
+mdw .
+
 # Set up a config file
 mdw config setup
 ```
@@ -80,6 +85,8 @@ All options are commented out by default — uncomment and edit to customize. md
 quit = ["q", "ctrl+c"]
 scroll_down = ["j", "down"]
 scroll_up = ["k", "up"]
+cursor_left = ["h", "left"]
+cursor_right = ["l", "right"]
 half_page_down = ["ctrl+d"]
 half_page_up = ["ctrl+u"]
 page_down = ["ctrl+f", "pagedown"]
@@ -92,9 +99,25 @@ search_next = ["n"]
 search_prev = ["N", "shift+n"]
 toggle_split_view = ["s"]
 toggle_markmap = ["m"]
+toggle_file_tree = ["t"]
+file_tree_parent = ["u"]
+toggle_visual_mode = ["v"]
 ```
 
 Key format: `"key"`, `"ctrl+key"`, `"shift+key"`, `"alt+key"`. Special keys: `up`, `down`, `pageup`, `pagedown`, `home`, `end`, `esc`, `enter`, `space`, `tab`.
+
+### Common shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `j` / `k` / `up` / `down` | Move cursor line |
+| `h` / `l` / `left` / `right` | Move cursor column |
+| `Enter` | Open link, toggle collapsible node, or open selected tree file |
+| `t` | Toggle file tree |
+| `u` | Move file tree root to parent directory |
+| `v` | Toggle visual mode; press again to copy selection |
+| `/`, `n`, `N` | Search and jump between matches |
+| `?` | Show help |
 
 ### Theme
 

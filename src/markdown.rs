@@ -10,8 +10,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::config::ThemeConfig;
 use crate::content::{ContentBlock, ImageSource};
 use crate::d2;
-use crate::mermaid;
 use crate::markmap;
+use crate::mermaid;
 use crate::mindmap;
 use crate::syntax_highlight;
 
@@ -64,7 +64,15 @@ pub fn render_json(
     let mut link_infos: Vec<LinkInfo> = Vec::new();
 
     render_json_value(
-        &value, &styles, collapsed, &mut lines, &mut link_infos, 0, "", base_line, false,
+        &value,
+        &styles,
+        collapsed,
+        &mut lines,
+        &mut link_infos,
+        0,
+        "",
+        base_line,
+        false,
     );
 
     JsonRenderResult {
@@ -171,7 +179,12 @@ fn render_json_value(
                                     spans.push(Span::styled(",".to_string(), styles.punct));
                                 }
                                 let col_start = child_indent * 2;
-                                let col_end = col_start + key.len() + 2 + 2 + placeholder.len() + if has_comma { 1 } else { 0 };
+                                let col_end = col_start
+                                    + key.len()
+                                    + 2
+                                    + 2
+                                    + placeholder.len()
+                                    + if has_comma { 1 } else { 0 };
                                 link_infos.push(LinkInfo {
                                     line: child_line_idx,
                                     col_start,
@@ -219,8 +232,16 @@ fn render_json_value(
                                             let grandchild_path = format!("{child_path}.{ck}");
                                             let child_has_comma = ci < child_entries.len() - 1;
                                             render_json_key_value(
-                                                ck, cv, styles, collapsed, lines, link_infos,
-                                                child_indent + 1, &grandchild_path, base_line, child_has_comma,
+                                                ck,
+                                                cv,
+                                                styles,
+                                                collapsed,
+                                                lines,
+                                                link_infos,
+                                                child_indent + 1,
+                                                &grandchild_path,
+                                                base_line,
+                                                child_has_comma,
                                             );
                                         }
                                     }
@@ -229,8 +250,15 @@ fn render_json_value(
                                             let grandchild_path = format!("{child_path}.{ci}");
                                             let child_has_comma = ci < arr.len() - 1;
                                             render_json_value(
-                                                cv, styles, collapsed, lines, link_infos,
-                                                child_indent + 1, &grandchild_path, base_line, child_has_comma,
+                                                cv,
+                                                styles,
+                                                collapsed,
+                                                lines,
+                                                link_infos,
+                                                child_indent + 1,
+                                                &grandchild_path,
+                                                base_line,
+                                                child_has_comma,
                                             );
                                         }
                                     }
@@ -251,8 +279,16 @@ fn render_json_value(
                         }
                         _ => {
                             render_json_key_value(
-                                key, val, styles, collapsed, lines, link_infos,
-                                child_indent, &child_path, base_line, has_comma,
+                                key,
+                                val,
+                                styles,
+                                collapsed,
+                                lines,
+                                link_infos,
+                                child_indent,
+                                &child_path,
+                                base_line,
+                                has_comma,
                             );
                         }
                     }
@@ -321,8 +357,15 @@ fn render_json_value(
                     };
                     let has_comma = i < arr.len() - 1;
                     render_json_value(
-                        item, styles, collapsed, lines, link_infos,
-                        indent + 1, &child_path, base_line, has_comma,
+                        item,
+                        styles,
+                        collapsed,
+                        lines,
+                        link_infos,
+                        indent + 1,
+                        &child_path,
+                        base_line,
+                        has_comma,
                     );
                 }
 
@@ -461,8 +504,16 @@ fn render_json_key_value(
                             let child_path = format!("{path}.{ck}");
                             let has_comma = i < entries.len() - 1;
                             render_json_key_value(
-                                ck, cv, styles, collapsed, lines, link_infos,
-                                indent + 1, &child_path, base_line, has_comma,
+                                ck,
+                                cv,
+                                styles,
+                                collapsed,
+                                lines,
+                                link_infos,
+                                indent + 1,
+                                &child_path,
+                                base_line,
+                                has_comma,
                             );
                         }
                     }
@@ -471,8 +522,15 @@ fn render_json_key_value(
                             let child_path = format!("{path}.{i}");
                             let has_comma = i < arr.len() - 1;
                             render_json_value(
-                                cv, styles, collapsed, lines, link_infos,
-                                indent + 1, &child_path, base_line, has_comma,
+                                cv,
+                                styles,
+                                collapsed,
+                                lines,
+                                link_infos,
+                                indent + 1,
+                                &child_path,
+                                base_line,
+                                has_comma,
                             );
                         }
                     }
@@ -535,10 +593,7 @@ fn escape_json_string(s: &str) -> String {
 }
 
 pub fn render_plain(input: &str) -> Text<'static> {
-    let lines: Vec<Line<'static>> = input
-        .lines()
-        .map(|l| Line::from(l.to_string()))
-        .collect();
+    let lines: Vec<Line<'static>> = input.lines().map(|l| Line::from(l.to_string())).collect();
     Text::from(lines)
 }
 
@@ -552,7 +607,8 @@ fn extract_frontmatter(input: &str) -> Option<(&str, &str)> {
     // Skip the opening ---
     let after_open = &trimmed[3..];
     // Must have a newline after opening ---
-    let after_open = after_open.strip_prefix('\n')
+    let after_open = after_open
+        .strip_prefix('\n')
         .or_else(|| after_open.strip_prefix("\r\n"))?;
     // Find closing ---
     if let Some(end_pos) = after_open.find("\n---") {
@@ -598,7 +654,10 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
 
 /// Render YAML frontmatter as a compact Obsidian-style "Properties" block.
 /// Each key-value pair is one line. Multiline values are joined with spaces and truncated.
-fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> (Vec<Line<'static>>, Vec<(String, String)>, Vec<LinkInfo>) {
+fn render_frontmatter(
+    raw: &str,
+    theme: &ThemeConfig,
+) -> (Vec<Line<'static>>, Vec<(String, String)>, Vec<LinkInfo>) {
     let border_style = Style::default().fg(theme.frontmatter_border.0);
     let title_style = Style::default()
         .fg(theme.frontmatter_title.0)
@@ -612,13 +671,14 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> (Vec<Line<'static>>, Ve
     let mut current_key: Option<String> = None;
     let mut current_parts: Vec<String> = Vec::new();
 
-    let flush = |key: &Option<String>, parts: &mut Vec<String>, entries: &mut Vec<(String, String)>| {
-        if let Some(k) = key {
-            let joined = parts.join("\n");
-            entries.push((k.clone(), joined));
-            parts.clear();
-        }
-    };
+    let flush =
+        |key: &Option<String>, parts: &mut Vec<String>, entries: &mut Vec<(String, String)>| {
+            if let Some(k) = key {
+                let joined = parts.join("\n");
+                entries.push((k.clone(), joined));
+                parts.clear();
+            }
+        };
 
     for line in raw.lines() {
         if !line.starts_with(' ') && !line.starts_with('\t') {
@@ -630,7 +690,9 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> (Vec<Line<'static>>, Ve
                 if val == "|" || val == ">" {
                     // Multiline block scalar — values follow on next lines
                 } else {
-                    let val = val.strip_prefix('"').and_then(|v| v.strip_suffix('"'))
+                    let val = val
+                        .strip_prefix('"')
+                        .and_then(|v| v.strip_suffix('"'))
                         .map(|v| v.to_string())
                         .unwrap_or(val);
                     if !val.is_empty() {
@@ -659,7 +721,10 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> (Vec<Line<'static>>, Ve
     lines.push(Line::from(vec![
         Span::styled("\u{2500}\u{2500} ", border_style),
         Span::styled("Properties", title_style),
-        Span::styled(" \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}", border_style),
+        Span::styled(
+            " \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+            border_style,
+        ),
     ]));
 
     // Each entry as: "  key  :  value"
@@ -676,7 +741,10 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> (Vec<Line<'static>>, Ve
         let line_idx = lines.len(); // 0-based row within this block
         // Register a LinkInfo spanning the entire property row for click detection
         let col_start = 0;
-        let col_end = 2 + UnicodeWidthStr::width(key.as_str()) + 2 + UnicodeWidthStr::width(display_val.as_str());
+        let col_end = 2
+            + UnicodeWidthStr::width(key.as_str())
+            + 2
+            + UnicodeWidthStr::width(display_val.as_str());
         fm_link_infos.push(LinkInfo {
             line: line_idx,
             col_start,
@@ -704,13 +772,23 @@ fn render_frontmatter(raw: &str, theme: &ThemeConfig) -> (Vec<Line<'static>>, Ve
     (lines, entries, fm_link_infos)
 }
 
-pub fn render_markdown(input: &str, theme: &ThemeConfig, collapsed_markmap_nodes: &HashSet<String>) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>, Vec<(String, String)>) {
-    let (frontmatter_lines, fm_entries, fm_link_infos, md_input) = if let Some((fm_raw, rest)) = extract_frontmatter(input) {
-        let (lines, entries, link_infos) = render_frontmatter(fm_raw, theme);
-        (lines, entries, link_infos, rest)
-    } else {
-        (Vec::new(), Vec::new(), Vec::new(), input)
-    };
+pub fn render_markdown(
+    input: &str,
+    theme: &ThemeConfig,
+    collapsed_markmap_nodes: &HashSet<String>,
+) -> (
+    Vec<ContentBlock>,
+    Vec<LinkInfo>,
+    HashMap<String, usize>,
+    Vec<(String, String)>,
+) {
+    let (frontmatter_lines, fm_entries, fm_link_infos, md_input) =
+        if let Some((fm_raw, rest)) = extract_frontmatter(input) {
+            let (lines, entries, link_infos) = render_frontmatter(fm_raw, theme);
+            (lines, entries, link_infos, rest)
+        } else {
+            (Vec::new(), Vec::new(), Vec::new(), input)
+        };
 
     let options = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
@@ -817,7 +895,10 @@ impl MarkdownWriter {
     }
 
     fn current_col(&self) -> usize {
-        self.current_spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum()
+        self.current_spans
+            .iter()
+            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .sum()
     }
 
     fn current_style(&self) -> Style {
@@ -862,7 +943,10 @@ impl MarkdownWriter {
     }
 
     fn cell_text_width(spans: &[Span<'_>]) -> usize {
-        spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum()
+        spans
+            .iter()
+            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .sum()
     }
 
     fn render_table(&mut self) {
@@ -871,9 +955,10 @@ impl MarkdownWriter {
             .fg(self.theme.table_header_fg.0)
             .add_modifier(Modifier::BOLD);
 
-        let num_cols = self.table_head.len().max(
-            self.table_rows.iter().map(|r| r.len()).max().unwrap_or(0),
-        );
+        let num_cols = self
+            .table_head
+            .len()
+            .max(self.table_rows.iter().map(|r| r.len()).max().unwrap_or(0));
         if num_cols == 0 {
             return;
         }
@@ -893,19 +978,24 @@ impl MarkdownWriter {
             *w = (*w).max(3);
         }
 
-        let make_border = |left: &str, mid: &str, right: &str, col_widths: &[usize]| -> Line<'static> {
-            let mut s = String::from(left);
-            for (i, &w) in col_widths.iter().enumerate() {
-                s.push_str(&"\u{2500}".repeat(w + 2));
-                if i < col_widths.len() - 1 {
-                    s.push_str(mid);
+        let make_border =
+            |left: &str, mid: &str, right: &str, col_widths: &[usize]| -> Line<'static> {
+                let mut s = String::from(left);
+                for (i, &w) in col_widths.iter().enumerate() {
+                    s.push_str(&"\u{2500}".repeat(w + 2));
+                    if i < col_widths.len() - 1 {
+                        s.push_str(mid);
+                    }
                 }
-            }
-            s.push_str(right);
-            Line::from(Span::styled(s, border_style))
-        };
+                s.push_str(right);
+                Line::from(Span::styled(s, border_style))
+            };
 
-        let render_row = |cells: &[Vec<Span<'static>>], col_widths: &[usize], alignments: &[Alignment], style_override: Option<Style>| -> Line<'static> {
+        let render_row = |cells: &[Vec<Span<'static>>],
+                          col_widths: &[usize],
+                          alignments: &[Alignment],
+                          style_override: Option<Style>|
+         -> Line<'static> {
             let mut spans: Vec<Span<'static>> = Vec::new();
             spans.push(Span::styled("\u{2502} ", border_style));
             for i in 0..col_widths.len() {
@@ -944,21 +1034,30 @@ impl MarkdownWriter {
         };
 
         // Top border
-        self.lines.push(make_border("\u{250C}", "\u{252C}", "\u{2510}", &col_widths));
+        self.lines
+            .push(make_border("\u{250C}", "\u{252C}", "\u{2510}", &col_widths));
 
         // Header row
         if !self.table_head.is_empty() {
-            self.lines.push(render_row(&self.table_head, &col_widths, &self.table_alignments, Some(header_style)));
-            self.lines.push(make_border("\u{251C}", "\u{253C}", "\u{2524}", &col_widths));
+            self.lines.push(render_row(
+                &self.table_head,
+                &col_widths,
+                &self.table_alignments,
+                Some(header_style),
+            ));
+            self.lines
+                .push(make_border("\u{251C}", "\u{253C}", "\u{2524}", &col_widths));
         }
 
         // Body rows
         for row in &self.table_rows {
-            self.lines.push(render_row(row, &col_widths, &self.table_alignments, None));
+            self.lines
+                .push(render_row(row, &col_widths, &self.table_alignments, None));
         }
 
         // Bottom border
-        self.lines.push(make_border("\u{2514}", "\u{2534}", "\u{2518}", &col_widths));
+        self.lines
+            .push(make_border("\u{2514}", "\u{2534}", "\u{2518}", &col_widths));
     }
 
     fn handle_event(&mut self, event: Event<'_>) {
@@ -972,10 +1071,12 @@ impl MarkdownWriter {
                     self.code_block_lines.push(text.to_string());
                 } else if self.in_table {
                     let style = self.current_style();
-                    self.current_cell.push(Span::styled(text.to_string(), style));
+                    self.current_cell
+                        .push(Span::styled(text.to_string(), style));
                 } else {
                     let style = self.current_style();
-                    self.current_spans.push(Span::styled(text.to_string(), style));
+                    self.current_spans
+                        .push(Span::styled(text.to_string(), style));
                 }
             }
             Event::Code(code) => {
@@ -985,18 +1086,14 @@ impl MarkdownWriter {
                     let style = Style::default()
                         .fg(self.theme.inline_code_fg.0)
                         .bg(self.theme.inline_code_bg.0);
-                    self.current_cell.push(Span::styled(
-                        format!(" {code} "),
-                        style,
-                    ));
+                    self.current_cell
+                        .push(Span::styled(format!(" {code} "), style));
                 } else {
                     let style = Style::default()
                         .fg(self.theme.inline_code_fg.0)
                         .bg(self.theme.inline_code_bg.0);
-                    self.current_spans.push(Span::styled(
-                        format!(" {code} "),
-                        style,
-                    ));
+                    self.current_spans
+                        .push(Span::styled(format!(" {code} "), style));
                 }
             }
             Event::SoftBreak => {
@@ -1021,7 +1118,8 @@ impl MarkdownWriter {
             Event::TaskListMarker(checked) => {
                 let marker = if checked { "[x] " } else { "[ ] " };
                 let style = self.current_style();
-                self.current_spans.push(Span::styled(marker.to_string(), style));
+                self.current_spans
+                    .push(Span::styled(marker.to_string(), style));
             }
             Event::FootnoteReference(label) => {
                 let label_str = label.to_string();
@@ -1029,7 +1127,8 @@ impl MarkdownWriter {
                     n
                 } else {
                     self.footnote_counter += 1;
-                    self.footnote_labels.insert(label_str.clone(), self.footnote_counter);
+                    self.footnote_labels
+                        .insert(label_str.clone(), self.footnote_counter);
                     self.footnote_counter
                 };
                 let display = format!("[{num}]");
@@ -1063,11 +1162,10 @@ impl MarkdownWriter {
                     HeadingLevel::H5 => (self.theme.heading5.0, "##### "),
                     HeadingLevel::H6 => (self.theme.heading6.0, "###### "),
                 };
-                let style = Style::default()
-                    .fg(color)
-                    .add_modifier(Modifier::BOLD);
+                let style = Style::default().fg(color).add_modifier(Modifier::BOLD);
                 self.style_stack.push(style);
-                self.current_spans.push(Span::styled(prefix.to_string(), style));
+                self.current_spans
+                    .push(Span::styled(prefix.to_string(), style));
             }
             Tag::Paragraph => {
                 if self.list_stack.is_empty() && !self.in_footnote_def {
@@ -1110,13 +1208,16 @@ impl MarkdownWriter {
                 self.current_spans.push(Span::styled(prefix, style));
             }
             Tag::Emphasis => {
-                self.style_stack.push(Style::default().add_modifier(Modifier::ITALIC));
+                self.style_stack
+                    .push(Style::default().add_modifier(Modifier::ITALIC));
             }
             Tag::Strong => {
-                self.style_stack.push(Style::default().add_modifier(Modifier::BOLD));
+                self.style_stack
+                    .push(Style::default().add_modifier(Modifier::BOLD));
             }
             Tag::Strikethrough => {
-                self.style_stack.push(Style::default().add_modifier(Modifier::CROSSED_OUT));
+                self.style_stack
+                    .push(Style::default().add_modifier(Modifier::CROSSED_OUT));
             }
             Tag::Link { dest_url, .. } => {
                 self.link_url = Some(dest_url.to_string());
@@ -1140,7 +1241,8 @@ impl MarkdownWriter {
                     n
                 } else {
                     self.footnote_counter += 1;
-                    self.footnote_labels.insert(label_str.clone(), self.footnote_counter);
+                    self.footnote_labels
+                        .insert(label_str.clone(), self.footnote_counter);
                     self.footnote_counter
                 };
                 let def_line = self.block_start_row + self.lines.len();
@@ -1195,8 +1297,12 @@ impl MarkdownWriter {
             }
             TagEnd::CodeBlock => {
                 let lang = self.code_block_lang.take();
-                let code_content: String = self.code_block_lines.drain(..).collect::<Vec<_>>().join("");
-                let is_diagram = matches!(lang.as_deref(), Some("mermaid") | Some("d2") | Some("mindmap") | Some("markmap"));
+                let code_content: String =
+                    self.code_block_lines.drain(..).collect::<Vec<_>>().join("");
+                let is_diagram = matches!(
+                    lang.as_deref(),
+                    Some("mermaid") | Some("d2") | Some("mindmap") | Some("markmap")
+                );
 
                 if is_diagram {
                     let rendered = match lang.as_deref() {
@@ -1205,7 +1311,12 @@ impl MarkdownWriter {
                         Some("mindmap") => mindmap::render_mindmap(&code_content, &self.theme),
                         Some("markmap") => {
                             let base = self.block_start_row + self.lines.len();
-                            let result = markmap::render_markmap(&code_content, &self.theme, &self.collapsed_markmap_nodes, base);
+                            let result = markmap::render_markmap(
+                                &code_content,
+                                &self.theme,
+                                &self.collapsed_markmap_nodes,
+                                base,
+                            );
                             self.link_infos.extend(result.link_infos);
                             result.text
                         }
@@ -1215,10 +1326,13 @@ impl MarkdownWriter {
                         self.lines.push(line);
                     }
                 } else if let Some(ref lang_str) = lang {
-                    if let Some(highlighted) = syntax_highlight::highlight_code(&code_content, lang_str) {
+                    if let Some(highlighted) =
+                        syntax_highlight::highlight_code(&code_content, lang_str)
+                    {
                         let bg = self.theme.code_block_bg.0;
                         for line in highlighted {
-                            let mut indented_spans = vec![Span::styled("  ", Style::default().bg(bg))];
+                            let mut indented_spans =
+                                vec![Span::styled("  ", Style::default().bg(bg))];
                             for span in line.spans {
                                 let style = if span.style.bg.is_none() {
                                     span.style.bg(bg)
@@ -1234,10 +1348,8 @@ impl MarkdownWriter {
                             .fg(self.theme.code_block_fg.0)
                             .bg(self.theme.code_block_bg.0);
                         for line in code_content.split('\n') {
-                            self.lines.push(Line::from(Span::styled(
-                                format!("  {line}"),
-                                code_style,
-                            )));
+                            self.lines
+                                .push(Line::from(Span::styled(format!("  {line}"), code_style)));
                         }
                     }
                 } else {
@@ -1245,18 +1357,15 @@ impl MarkdownWriter {
                         .fg(self.theme.code_block_fg.0)
                         .bg(self.theme.code_block_bg.0);
                     for line in code_content.split('\n') {
-                        self.lines.push(Line::from(Span::styled(
-                            format!("  {line}"),
-                            code_style,
-                        )));
+                        self.lines
+                            .push(Line::from(Span::styled(format!("  {line}"), code_style)));
                     }
                 }
                 self.in_code_block = false;
                 self.push_blank_line();
             }
             TagEnd::List(_) => {
-                if let Some(ListKind::Ordered(_)) = self.list_stack.last() {
-                }
+                if let Some(ListKind::Ordered(_)) = self.list_stack.last() {}
                 self.list_stack.pop();
                 self.flush_line();
                 if self.list_stack.is_empty() {

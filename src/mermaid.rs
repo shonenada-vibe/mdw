@@ -316,8 +316,13 @@ impl FlowGraph {
         }
         for (i, node) in self.nodes.iter().enumerate() {
             grid.draw_box(
-                node_x[i], node_y[i], node_widths[i],
-                &node.label, &node.shape, border_style, text_style,
+                node_x[i],
+                node_y[i],
+                node_widths[i],
+                &node.label,
+                &node.shape,
+                border_style,
+                text_style,
             );
             let cx = node_x[i] + node_widths[i] / 2;
             if children_map.contains_key(&i) {
@@ -414,8 +419,13 @@ impl FlowGraph {
         }
         for (i, node) in self.nodes.iter().enumerate() {
             grid.draw_box(
-                node_x[i], node_y[i], node_widths[i],
-                &node.label, &node.shape, border_style, text_style,
+                node_x[i],
+                node_y[i],
+                node_widths[i],
+                &node.label,
+                &node.shape,
+                border_style,
+                text_style,
             );
             let cy = node_y[i] + node_height / 2;
             if children_map.contains_key(&i) {
@@ -512,10 +522,7 @@ fn render_sequence(input: &str, theme: &ThemeConfig) -> Text<'static> {
                     .unwrap_or("?")
                     .trim_end_matches(':');
                 let idx = ensure_p(who, &mut participants, &mut pmap);
-                events.push(SeqEvent::Note(SeqNote {
-                    at: idx,
-                    text,
-                }));
+                events.push(SeqEvent::Note(SeqNote { at: idx, text }));
             }
             continue;
         }
@@ -639,19 +646,23 @@ fn render_sequence(input: &str, theme: &ThemeConfig) -> Text<'static> {
     let np = participants.len();
     let lifeline_char = '\u{2502}';
 
-    let make_lifeline = |lines: &mut Vec<Line<'static>>, np: usize, spacing: usize, edge_s: Style| {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        for i in 0..np {
-            let cx = i * spacing + spacing / 2;
-            let prev_end = spans.iter().map(|s: &Span| s.content.chars().count()).sum::<usize>();
-            let pad = cx.saturating_sub(prev_end);
-            if pad > 0 {
-                spans.push(Span::raw(" ".repeat(pad)));
+    let make_lifeline =
+        |lines: &mut Vec<Line<'static>>, np: usize, spacing: usize, edge_s: Style| {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            for i in 0..np {
+                let cx = i * spacing + spacing / 2;
+                let prev_end = spans
+                    .iter()
+                    .map(|s: &Span| s.content.chars().count())
+                    .sum::<usize>();
+                let pad = cx.saturating_sub(prev_end);
+                if pad > 0 {
+                    spans.push(Span::raw(" ".repeat(pad)));
+                }
+                spans.push(Span::styled(lifeline_char.to_string(), edge_s));
             }
-            spans.push(Span::styled(lifeline_char.to_string(), edge_s));
-        }
-        lines.push(Line::from(spans));
-    };
+            lines.push(Line::from(spans));
+        };
 
     let mut indent_depth = 0usize;
 
@@ -687,7 +698,11 @@ fn render_sequence(input: &str, theme: &ThemeConfig) -> Text<'static> {
                 };
                 let arrow_width = if right > left { right - left } else { 1 };
                 let arrow_ch = if msg.dashed { '\u{2504}' } else { '\u{2500}' };
-                let arrow_tip = if from_cx <= to_cx { '\u{25B6}' } else { '\u{25C0}' };
+                let arrow_tip = if from_cx <= to_cx {
+                    '\u{25B6}'
+                } else {
+                    '\u{25C0}'
+                };
 
                 let mut arrow_str = String::new();
                 for _ in 0..arrow_width.saturating_sub(1) {
@@ -809,7 +824,11 @@ fn render_class(input: &str, theme: &ThemeConfig) -> Text<'static> {
             let class_name = line[..colon].trim();
             let member = line[colon + 3..].trim();
             ensure_class(class_name, &mut classes);
-            classes.get_mut(class_name).unwrap().members.push(member.to_string());
+            classes
+                .get_mut(class_name)
+                .unwrap()
+                .members
+                .push(member.to_string());
             continue;
         }
 
@@ -878,18 +897,15 @@ fn render_class(input: &str, theme: &ThemeConfig) -> Text<'static> {
             ),
             border,
         )));
-        let name_pad = box_w.saturating_sub(2).saturating_sub(info.name.chars().count());
+        let name_pad = box_w
+            .saturating_sub(2)
+            .saturating_sub(info.name.chars().count());
         let left_p = name_pad / 2;
         let right_p = name_pad - left_p;
         lines.push(Line::from(vec![
             Span::styled("  \u{2502}", border),
             Span::styled(
-                format!(
-                    "{}{}{}",
-                    " ".repeat(left_p),
-                    info.name,
-                    " ".repeat(right_p)
-                ),
+                format!("{}{}{}", " ".repeat(left_p), info.name, " ".repeat(right_p)),
                 Style::default()
                     .fg(theme.mermaid_node_text.0)
                     .add_modifier(Modifier::BOLD),
@@ -906,7 +922,9 @@ fn render_class(input: &str, theme: &ThemeConfig) -> Text<'static> {
                 border,
             )));
             for member in &info.members {
-                let mpad = box_w.saturating_sub(2).saturating_sub(member.chars().count());
+                let mpad = box_w
+                    .saturating_sub(2)
+                    .saturating_sub(member.chars().count());
                 lines.push(Line::from(vec![
                     Span::styled("  \u{2502} ", border),
                     Span::styled(
@@ -989,7 +1007,10 @@ fn render_gantt(input: &str, theme: &ThemeConfig) -> Text<'static> {
             title = rest.trim().to_string();
             continue;
         }
-        if line.starts_with("dateFormat") || line.starts_with("excludes") || line.starts_with("axisFormat") {
+        if line.starts_with("dateFormat")
+            || line.starts_with("excludes")
+            || line.starts_with("axisFormat")
+        {
             continue;
         }
         if let Some(rest) = line.strip_prefix("section ") {
@@ -1021,7 +1042,11 @@ fn render_gantt(input: &str, theme: &ThemeConfig) -> Text<'static> {
     lines.push(Line::from(Span::styled(title.clone(), title_s)));
     lines.push(Line::from(""));
 
-    let max_name = tasks.iter().map(|t| t.name.chars().count()).max().unwrap_or(10);
+    let max_name = tasks
+        .iter()
+        .map(|t| t.name.chars().count())
+        .max()
+        .unwrap_or(10);
     let bar_width: usize = 30;
 
     let mut prev_section = String::new();
@@ -1054,10 +1079,7 @@ fn render_gantt(input: &str, theme: &ThemeConfig) -> Text<'static> {
         let bar = bar_ch.to_string().repeat(bar_len);
 
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {}{} ", task.name, " ".repeat(name_pad)),
-                text_s,
-            ),
+            Span::styled(format!("  {}{} ", task.name, " ".repeat(name_pad)), text_s),
             Span::styled("\u{2502} ", border),
             Span::styled(bar, bar_style),
         ]));
@@ -1101,11 +1123,22 @@ fn render_git(input: &str, theme: &ThemeConfig) -> Text<'static> {
     let mut commit_num: usize = 0;
 
     enum GitEvent {
-        Commit { branch: String, id: usize },
+        Commit {
+            branch: String,
+            id: usize,
+        },
         #[allow(dead_code)]
-        Branch { name: String, from: String },
-        Checkout { name: String },
-        Merge { from: String, into: String },
+        Branch {
+            name: String,
+            from: String,
+        },
+        Checkout {
+            name: String,
+        },
+        Merge {
+            from: String,
+            into: String,
+        },
     }
 
     let mut events: Vec<GitEvent> = Vec::new();
@@ -1189,12 +1222,19 @@ fn render_git(input: &str, theme: &ThemeConfig) -> Text<'static> {
         let color = colors[b.col % colors.len()];
         lines.push(Line::from(vec![
             Span::styled(col_marker, Style::default().fg(color)),
-            Span::styled(b.name.clone(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                b.name.clone(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
         ]));
     }
     lines.push(Line::from(""));
 
-    let make_rail = |active_cols: &[bool], num_cols: usize, col_spacing: usize, theme: &ThemeConfig| -> Vec<Span<'static>> {
+    let make_rail = |active_cols: &[bool],
+                     num_cols: usize,
+                     col_spacing: usize,
+                     theme: &ThemeConfig|
+     -> Vec<Span<'static>> {
         let colors = [
             theme.mermaid_node_border.0,
             theme.mermaid_edge_label.0,
@@ -1238,14 +1278,10 @@ fn render_git(input: &str, theme: &ThemeConfig) -> Text<'static> {
                 // Replace the column char with commit marker
                 let span_idx = 1 + col * 2; // accounting for initial "  " and spacing spans
                 if span_idx < rail.len() {
-                    rail[span_idx] =
-                        Span::styled("\u{25CF}", Style::default().fg(color));
+                    rail[span_idx] = Span::styled("\u{25CF}", Style::default().fg(color));
                 }
                 // Add commit label
-                rail.push(Span::styled(
-                    format!("  #{id}"),
-                    text_s,
-                ));
+                rail.push(Span::styled(format!("  #{id}"), text_s));
                 lines.push(Line::from(rail));
             }
             GitEvent::Branch { name, from: _ } => {
@@ -1296,10 +1332,7 @@ fn render_git(input: &str, theme: &ThemeConfig) -> Text<'static> {
                     }
                     if c < num_cols - 1 {
                         if c >= left && c < right {
-                            spans.push(Span::styled(
-                                "\u{2500}".repeat(col_spacing - 1),
-                                edge_s,
-                            ));
+                            spans.push(Span::styled("\u{2500}".repeat(col_spacing - 1), edge_s));
                         } else {
                             spans.push(Span::raw(" ".repeat(col_spacing - 1)));
                         }
@@ -1342,10 +1375,7 @@ fn render_journey(input: &str, theme: &ThemeConfig) -> Text<'static> {
 
     for line in input.lines() {
         let line = line.trim();
-        if line.is_empty()
-            || line.starts_with("%%")
-            || line == "journey"
-        {
+        if line.is_empty() || line.starts_with("%%") || line == "journey" {
             continue;
         }
         if let Some(rest) = line.strip_prefix("title ") {
@@ -1392,7 +1422,7 @@ fn render_journey(input: &str, theme: &ThemeConfig) -> Text<'static> {
 
     let score_to_face = |s: u8| -> &'static str {
         match s {
-            5 => "\u{1F600}",  // very happy (or fallback)
+            5 => "\u{1F600}", // very happy (or fallback)
             4 => ":)",
             3 => ":|",
             2 => ":(",
@@ -1441,10 +1471,7 @@ fn render_journey(input: &str, theme: &ThemeConfig) -> Text<'static> {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {}{} ", step.name, " ".repeat(name_pad)),
-                text_s,
-            ),
+            Span::styled(format!("  {}{} ", step.name, " ".repeat(name_pad)), text_s),
             Span::styled(format!("{face} "), bar_style),
             Span::styled("\u{2502}", border),
             Span::styled(bar, bar_style),

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
-use serde::de::{self, Visitor};
 use serde::Deserialize;
+use serde::de::{self, Visitor};
 
 // ---------------------------------------------------------------------------
 // KeyCombo
@@ -176,6 +176,8 @@ pub enum Action {
     Quit,
     ScrollDown,
     ScrollUp,
+    CursorLeft,
+    CursorRight,
     HalfPageDown,
     HalfPageUp,
     PageDown,
@@ -188,6 +190,9 @@ pub enum Action {
     SearchPrev,
     ToggleSplitView,
     ToggleMarkmap,
+    ToggleFileTree,
+    FileTreeParent,
+    ToggleVisualMode,
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +205,8 @@ pub struct KeybindingsConfig {
     pub quit: Vec<KeyCombo>,
     pub scroll_down: Vec<KeyCombo>,
     pub scroll_up: Vec<KeyCombo>,
+    pub cursor_left: Vec<KeyCombo>,
+    pub cursor_right: Vec<KeyCombo>,
     pub half_page_down: Vec<KeyCombo>,
     pub half_page_up: Vec<KeyCombo>,
     pub page_down: Vec<KeyCombo>,
@@ -212,6 +219,9 @@ pub struct KeybindingsConfig {
     pub search_prev: Vec<KeyCombo>,
     pub toggle_split_view: Vec<KeyCombo>,
     pub toggle_markmap: Vec<KeyCombo>,
+    pub toggle_file_tree: Vec<KeyCombo>,
+    pub file_tree_parent: Vec<KeyCombo>,
+    pub toggle_visual_mode: Vec<KeyCombo>,
 }
 
 impl Default for KeybindingsConfig {
@@ -220,6 +230,8 @@ impl Default for KeybindingsConfig {
             quit: parse_combos(&["q", "ctrl+c"]),
             scroll_down: parse_combos(&["j", "down"]),
             scroll_up: parse_combos(&["k", "up"]),
+            cursor_left: parse_combos(&["h", "left"]),
+            cursor_right: parse_combos(&["l", "right"]),
             half_page_down: parse_combos(&["ctrl+d"]),
             half_page_up: parse_combos(&["ctrl+u"]),
             page_down: parse_combos(&["ctrl+f", "pagedown", "space"]),
@@ -232,6 +244,9 @@ impl Default for KeybindingsConfig {
             search_prev: parse_combos(&["N", "shift+n"]),
             toggle_split_view: parse_combos(&["s"]),
             toggle_markmap: parse_combos(&["m"]),
+            toggle_file_tree: parse_combos(&["t"]),
+            file_tree_parent: parse_combos(&["u"]),
+            toggle_visual_mode: parse_combos(&["v"]),
         }
     }
 }
@@ -249,6 +264,8 @@ impl KeybindingsConfig {
             (Action::Quit, &self.quit),
             (Action::ScrollDown, &self.scroll_down),
             (Action::ScrollUp, &self.scroll_up),
+            (Action::CursorLeft, &self.cursor_left),
+            (Action::CursorRight, &self.cursor_right),
             (Action::HalfPageDown, &self.half_page_down),
             (Action::HalfPageUp, &self.half_page_up),
             (Action::PageDown, &self.page_down),
@@ -261,6 +278,9 @@ impl KeybindingsConfig {
             (Action::SearchPrev, &self.search_prev),
             (Action::ToggleSplitView, &self.toggle_split_view),
             (Action::ToggleMarkmap, &self.toggle_markmap),
+            (Action::ToggleFileTree, &self.toggle_file_tree),
+            (Action::FileTreeParent, &self.file_tree_parent),
+            (Action::ToggleVisualMode, &self.toggle_visual_mode),
         ];
 
         for (action, combos) in bindings {
@@ -462,6 +482,8 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # quit = ["q", "ctrl+c"]
 # scroll_down = ["j", "down"]
 # scroll_up = ["k", "up"]
+# cursor_left = ["h", "left"]
+# cursor_right = ["l", "right"]
 # half_page_down = ["ctrl+d"]
 # half_page_up = ["ctrl+u"]
 # page_down = ["ctrl+f", "pagedown", "space"]
@@ -474,6 +496,9 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # search_prev = ["N", "shift+n"]
 # toggle_split_view = ["s"]
 # toggle_markmap = ["m"]
+# toggle_file_tree = ["t"]
+# file_tree_parent = ["u"]
+# toggle_visual_mode = ["v"]
 
 # [theme]
 # Colors can be named colors or hex "#rrggbb".

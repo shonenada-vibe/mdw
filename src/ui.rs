@@ -4,7 +4,9 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 use ratatui_image::StatefulImage;
 
 use crate::config::ThemeConfig;
@@ -23,27 +25,34 @@ struct VisibleBlock {
 pub fn render(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
     app.set_viewport_height(chunks[0].height);
 
     let theme = app.config().theme.clone();
-
-    if app.split_view() {
-        render_split_view(frame, app, chunks[0], &theme);
+    let body_area = chunks[0];
+    let content_area = if app.file_tree_view() {
+        let panes = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(30), Constraint::Min(20)])
+            .split(body_area);
+        render_file_tree_panel(frame, app, panes[0], &theme);
+        panes[1]
     } else {
-        render_single_view(frame, app, chunks[0], &theme);
+        body_area
+    };
+    if app.split_view() {
+        render_split_view(frame, app, content_area, &theme);
+    } else {
+        render_single_view(frame, app, content_area, &theme);
     }
 
     // Scrollbar
-    let mut scrollbar_state = ScrollbarState::new(app.total_lines())
-        .position(app.scroll_offset() as usize);
+    let mut scrollbar_state =
+        ScrollbarState::new(app.total_lines()).position(app.scroll_offset() as usize);
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
-    frame.render_stateful_widget(scrollbar, chunks[0], &mut scrollbar_state);
+    frame.render_stateful_widget(scrollbar, content_area, &mut scrollbar_state);
 
     // Status bar
     render_status_bar(frame, app, chunks[1], &theme);
@@ -64,6 +73,59 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 }
 
+fn render_file_tree_panel(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConfig) {
+    let block = Block::default()
+        .title(format!(" Files: {} ", app.file_tree().root().display()))
+        .borders(Borders::ALL)
+        .style(Style::default().fg(theme.status_bar_fg.0));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let selected = app.file_tree_selected();
+    let scroll = app.file_tree_scroll();
+    let visible = inner.height as usize;
+    let cursor_style = Style::default()
+        .bg(theme.selection_bg.0)
+        .fg(theme.selection_fg.0)
+        .add_modifier(Modifier::BOLD);
+    let normal_style = Style::default().fg(theme.status_bar_fg.0);
+    let dir_style = Style::default().fg(theme.heading2.0);
+
+    let lines: Vec<Line<'static>> = app
+        .file_tree()
+        .entries()
+        .iter()
+        .skip(scroll)
+        .take(visible)
+        .enumerate()
+        .map(|(offset, entry)| {
+            let index = scroll + offset;
+            let marker = if index == selected { ">" } else { " " };
+            let indent = "  ".repeat(entry.depth);
+            let label = if entry.is_dir {
+                format!("{}/", entry.name)
+            } else {
+                entry.name.clone()
+            };
+            let style = if index == selected {
+                cursor_style
+            } else if entry.is_dir {
+                dir_style
+            } else {
+                normal_style
+            };
+
+            Line::from(Span::styled(format!("{marker}{indent}{label}"), style))
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect, theme: &ThemeConfig) {
     // Split horizontally: source | divider | rendered
     let panes = Layout::default()
@@ -78,6 +140,7 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme
     let source_area = panes[0];
     let divider_area = panes[1];
     let rendered_area = panes[2];
+    app.set_content_area(rendered_area.x, rendered_area.width);
 
     // Render vertical divider
     let divider_style = Style::default().fg(theme.line_number.0);
@@ -97,14 +160,17 @@ fn render_source_pane(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeCon
     let raw = app.raw_content();
     let raw_lines: Vec<&str> = raw.lines().collect();
     let total_raw_lines = raw_lines.len().max(1);
-    let gutter_width = if total_raw_lines == 0 { 1 } else { total_raw_lines.ilog10() as usize + 1 };
+    let gutter_width = if total_raw_lines == 0 {
+        1
+    } else {
+        total_raw_lines.ilog10() as usize + 1
+    };
     let scroll_offset = app.scroll_offset() as usize;
     let viewport_height = area.height as usize;
 
     let lineno_style = Style::default().fg(theme.line_number.0);
     let sep_style = Style::default().fg(theme.line_number.0);
-    let code_style = Style::default()
-        .fg(theme.code_block_fg.0);
+    let code_style = Style::default().fg(theme.code_block_fg.0);
 
     let mut display_lines: Vec<Line<'static>> = Vec::with_capacity(viewport_height);
 
@@ -144,6 +210,8 @@ fn render_content_pane(frame: &mut Frame, app: &mut App, area: Rect, theme: &The
     let has_search = !search_query.is_empty() && !app.search_matches().is_empty();
     let search_matches: Vec<usize> = app.search_matches().to_vec();
     let hover_line = app.hover_line();
+    let cursor_line = app.cursor_line();
+    let cursor_col = app.cursor_col();
     let line_wrap = app.config().behavior.line_wrap;
     let selection = app.selection().cloned();
 
@@ -151,18 +219,34 @@ fn render_content_pane(frame: &mut Frame, app: &mut App, area: Rect, theme: &The
     let sep_style = Style::default().fg(theme.line_number.0);
     let hover_bg = theme.hover_bg.0;
 
-    let visible_blocks = compute_visible_blocks(app.content_blocks(), scroll_offset, viewport_height, area);
+    let visible_blocks =
+        compute_visible_blocks(app.content_blocks(), scroll_offset, viewport_height, area);
     let gutter_total_width = gutter_width + 3;
 
     render_blocks(
-        frame, app, &visible_blocks, area, gutter_width, gutter_total_width,
-        &lineno_style, &sep_style, hover_bg, hover_line,
-        has_search, &search_matches, &search_query, theme, line_wrap,
+        frame,
+        app,
+        &visible_blocks,
+        area,
+        gutter_width,
+        gutter_total_width,
+        &lineno_style,
+        &sep_style,
+        hover_bg,
+        hover_line,
+        cursor_line,
+        cursor_col,
+        has_search,
+        &search_matches,
+        &search_query,
+        theme,
+        line_wrap,
         &selection,
     );
 }
 
 fn render_single_view(frame: &mut Frame, app: &mut App, area: Rect, theme: &ThemeConfig) {
+    app.set_content_area(area.x, area.width);
     let scroll_offset = app.scroll_offset() as usize;
     let viewport_height = area.height as usize;
     let gutter_width = app.gutter_width();
@@ -170,6 +254,8 @@ fn render_single_view(frame: &mut Frame, app: &mut App, area: Rect, theme: &Them
     let has_search = !search_query.is_empty() && !app.search_matches().is_empty();
     let search_matches: Vec<usize> = app.search_matches().to_vec();
     let hover_line = app.hover_line();
+    let cursor_line = app.cursor_line();
+    let cursor_col = app.cursor_col();
     let line_wrap = app.config().behavior.line_wrap;
     let selection = app.selection().cloned();
 
@@ -177,18 +263,38 @@ fn render_single_view(frame: &mut Frame, app: &mut App, area: Rect, theme: &Them
     let sep_style = Style::default().fg(theme.line_number.0);
     let hover_bg = theme.hover_bg.0;
 
-    let visible_blocks = compute_visible_blocks(app.content_blocks(), scroll_offset, viewport_height, area);
+    let visible_blocks =
+        compute_visible_blocks(app.content_blocks(), scroll_offset, viewport_height, area);
     let gutter_total_width = gutter_width + 3;
 
     render_blocks(
-        frame, app, &visible_blocks, area, gutter_width, gutter_total_width,
-        &lineno_style, &sep_style, hover_bg, hover_line,
-        has_search, &search_matches, &search_query, theme, line_wrap,
+        frame,
+        app,
+        &visible_blocks,
+        area,
+        gutter_width,
+        gutter_total_width,
+        &lineno_style,
+        &sep_style,
+        hover_bg,
+        hover_line,
+        cursor_line,
+        cursor_col,
+        has_search,
+        &search_matches,
+        &search_query,
+        theme,
+        line_wrap,
         &selection,
     );
 }
 
-fn compute_visible_blocks(blocks: &[ContentBlock], scroll_offset: usize, viewport_height: usize, area: Rect) -> Vec<VisibleBlock> {
+fn compute_visible_blocks(
+    blocks: &[ContentBlock],
+    scroll_offset: usize,
+    viewport_height: usize,
+    area: Rect,
+) -> Vec<VisibleBlock> {
     let mut visible_blocks: Vec<VisibleBlock> = Vec::new();
     let mut cumulative_row: usize = 0;
 
@@ -250,6 +356,8 @@ fn render_blocks(
     sep_style: &Style,
     hover_bg: ratatui::style::Color,
     hover_line: Option<usize>,
+    cursor_line: Option<usize>,
+    cursor_col: usize,
     has_search: bool,
     search_matches: &[usize],
     search_query: &str,
@@ -261,6 +369,7 @@ fn render_blocks(
     // Indexed by (screen_y - content_area.y). Value is the logical line index.
     let viewport_h = content_area.height as usize;
     let mut visual_line_map: Vec<Option<usize>> = vec![None; viewport_h];
+    let cursor_line_bg = theme.code_block_bg.0;
 
     for vb in visible_blocks {
         let block_start = vb.block_start;
@@ -280,8 +389,12 @@ fn render_blocks(
             let blocks = app.content_blocks();
             match &blocks[block_idx] {
                 ContentBlock::Text { .. } => BlockKind::Text,
-                ContentBlock::Image { protocol: Some(_), .. } => BlockKind::ImageWithProtocol,
-                ContentBlock::Image { error: Some(err), .. } => BlockKind::ImageWithError(err.clone()),
+                ContentBlock::Image {
+                    protocol: Some(_), ..
+                } => BlockKind::ImageWithProtocol,
+                ContentBlock::Image {
+                    error: Some(err), ..
+                } => BlockKind::ImageWithError(err.clone()),
                 ContentBlock::Image { alt_text, .. } => {
                     let alt = if alt_text.is_empty() {
                         "[Image]".to_string()
@@ -310,32 +423,27 @@ fn render_blocks(
 
                         let abs_row = block_start + visible_start + i;
                         let is_hovered = hover_line == Some(abs_row);
-                        let ln_style = if is_hovered {
-                            lineno_style.bg(hover_bg)
-                        } else {
-                            *lineno_style
-                        };
-                        let sp_style = if is_hovered {
-                            sep_style.bg(hover_bg)
-                        } else {
-                            *sep_style
-                        };
-
-                        let mut content_spans: Vec<Span<'_>> = if has_search && search_matches.contains(&abs_row) {
-                            let mut search_spans = highlight_search_spans(&line.spans, search_query, theme);
-                            if is_hovered {
-                                for s in &mut search_spans {
-                                    s.style = s.style.bg(hover_bg);
-                                }
-                            }
-                            search_spans
+                        let is_cursor_line = cursor_line == Some(abs_row);
+                        let row_bg = if is_cursor_line {
+                            Some(cursor_line_bg)
                         } else if is_hovered {
-                            line.spans.iter().map(|s| {
-                                Span::styled(s.content.clone(), s.style.bg(hover_bg))
-                            }).collect()
+                            Some(hover_bg)
                         } else {
-                            line.spans.iter().cloned().collect()
+                            None
                         };
+                        let ln_style = row_bg.map_or(*lineno_style, |bg| lineno_style.bg(bg));
+                        let sp_style = row_bg.map_or(*sep_style, |bg| sep_style.bg(bg));
+
+                        let mut content_spans: Vec<Span<'_>> =
+                            if has_search && search_matches.contains(&abs_row) {
+                                highlight_search_spans(&line.spans, search_query, theme)
+                            } else {
+                                line.spans.iter().cloned().collect()
+                            };
+
+                        if let Some(bg) = row_bg {
+                            content_spans = apply_line_background(&content_spans, bg);
+                        }
 
                         // Apply selection highlighting
                         if let Some(sel) = selection {
@@ -348,7 +456,11 @@ fn render_blocks(
                             };
 
                             if abs_row >= sel_start.0 && abs_row <= sel_end.0 {
-                                let col_start = if abs_row == sel_start.0 { sel_start.1 } else { 0 };
+                                let col_start = if abs_row == sel_start.0 {
+                                    sel_start.1
+                                } else {
+                                    0
+                                };
                                 let col_end = if abs_row == sel_end.0 {
                                     sel_end.1
                                 } else {
@@ -356,15 +468,25 @@ fn render_blocks(
                                 };
                                 if col_start < col_end {
                                     content_spans = highlight_selection_spans(
-                                        &content_spans, col_start, col_end, theme,
+                                        &content_spans,
+                                        col_start,
+                                        col_end,
+                                        theme,
                                     );
                                 }
                             }
                         }
 
+                        if is_cursor_line {
+                            content_spans =
+                                apply_cursor_to_spans(&content_spans, cursor_col, theme);
+                        }
+
                         // Estimate visual rows this line will take when wrapped
                         let visual_rows = if line_wrap && content_w > 0 {
-                            let display_w: usize = line.spans.iter()
+                            let display_w: usize = line
+                                .spans
+                                .iter()
                                 .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
                                 .sum();
                             ((display_w + content_w - 1) / content_w).max(1) as u16
@@ -416,26 +538,25 @@ fn render_blocks(
                     }
                 }
             }
-            BlockKind::ImageWithProtocol | BlockKind::ImageWithError(_) | BlockKind::ImageFallback(_) => {
+            BlockKind::ImageWithProtocol
+            | BlockKind::ImageWithError(_)
+            | BlockKind::ImageFallback(_) => {
                 for row in 0..visible_rows {
                     let abs_row = block_start + visible_start + row;
                     let is_hovered = hover_line == Some(abs_row);
-                    let ln_style = if is_hovered {
-                        lineno_style.bg(hover_bg)
+                    let is_cursor_line = cursor_line == Some(abs_row);
+                    let row_bg = if is_cursor_line {
+                        Some(cursor_line_bg)
+                    } else if is_hovered {
+                        Some(hover_bg)
                     } else {
-                        *lineno_style
+                        None
                     };
-                    let sp_style = if is_hovered {
-                        sep_style.bg(hover_bg)
-                    } else {
-                        *sep_style
-                    };
+                    let ln_style = row_bg.map_or(*lineno_style, |bg| lineno_style.bg(bg));
+                    let sp_style = row_bg.map_or(*sep_style, |bg| sep_style.bg(bg));
 
                     let gutter_line = Line::from(vec![
-                        Span::styled(
-                            format!("{:>width$} ", "~", width = gutter_width),
-                            ln_style,
-                        ),
+                        Span::styled(format!("{:>width$} ", "~", width = gutter_width), ln_style),
                         Span::styled("│ ", sp_style),
                     ]);
 
@@ -464,7 +585,11 @@ fn render_blocks(
                 match kind {
                     BlockKind::ImageWithProtocol => {
                         let blocks_mut = app.content_blocks_mut();
-                        if let ContentBlock::Image { protocol: Some(proto), .. } = &mut blocks_mut[block_idx] {
+                        if let ContentBlock::Image {
+                            protocol: Some(proto),
+                            ..
+                        } = &mut blocks_mut[block_idx]
+                        {
                             let image_widget = StatefulImage::default();
                             frame.render_stateful_widget(image_widget, image_rect, proto);
                         }
@@ -482,13 +607,34 @@ fn render_blocks(
                     }
                     _ => {}
                 }
+
+                if cursor_line.is_some_and(|line| {
+                    line >= block_start + visible_start
+                        && line < block_start + visible_start + visible_rows
+                }) {
+                    let cursor_rect = Rect {
+                        x: image_rect.x,
+                        y: sy + (cursor_line.unwrap() - (block_start + visible_start)) as u16,
+                        width: 1.min(image_rect.width),
+                        height: 1,
+                    };
+                    frame.render_widget(
+                        Paragraph::new(" ").style(
+                            Style::default()
+                                .fg(theme.selection_fg.0)
+                                .bg(theme.selection_bg.0),
+                        ),
+                        cursor_rect,
+                    );
+                }
             }
         }
     }
 
     // Store the visual line map for mouse handling.
     // Convert Option<usize> to usize, using usize::MAX as sentinel for unmapped rows.
-    let map: Vec<usize> = visual_line_map.into_iter()
+    let map: Vec<usize> = visual_line_map
+        .into_iter()
         .map(|v| v.unwrap_or(usize::MAX))
         .collect();
     app.set_visual_line_map(map);
@@ -513,12 +659,21 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConf
         .style(Style::default().bg(status_bar_bg))
     } else {
         let split_indicator = if app.split_view() { " [Split]" } else { "" };
+        let tree_indicator = if app.file_tree_view() { " [Tree]" } else { "" };
+        let visual_indicator = if app.visual_mode() { " [VISUAL]" } else { "" };
+        let cursor_indicator = app
+            .cursor_line()
+            .map(|line| format!(" | {}:{}", line + 1, app.cursor_col() + 1))
+            .unwrap_or_default();
         let scroll_info = format!(
-            " {} | {}/{}{} ",
+            " {} | {}/{}{}{}{}{} ",
             app.file_path_display(),
             app.scroll_offset() + 1,
             app.total_lines(),
             split_indicator,
+            tree_indicator,
+            visual_indicator,
+            cursor_indicator,
         );
         Paragraph::new(Line::from(vec![
             Span::styled(
@@ -539,7 +694,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConf
 fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
     let area = frame.area();
     let help_w = 50u16.min(area.width.saturating_sub(4));
-    let help_h = 20u16.min(area.height.saturating_sub(4));
+    let help_h = 24u16.min(area.height.saturating_sub(4));
     let help_area = Rect {
         x: (area.width.saturating_sub(help_w)) / 2,
         y: (area.height.saturating_sub(help_h)) / 2,
@@ -560,7 +715,9 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
             .iter()
             .map(|c| {
                 let mut s = String::new();
-                if c.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                if c.modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                {
                     s.push_str("Ctrl+");
                 }
                 if c.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
@@ -588,8 +745,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
 
     let entries: Vec<(&str, String)> = vec![
         ("Quit", fmt_keys(&kb.quit)),
-        ("Scroll Down", fmt_keys(&kb.scroll_down)),
-        ("Scroll Up", fmt_keys(&kb.scroll_up)),
+        ("Cursor Down", fmt_keys(&kb.scroll_down)),
+        ("Cursor Up", fmt_keys(&kb.scroll_up)),
+        ("Cursor Left", fmt_keys(&kb.cursor_left)),
+        ("Cursor Right", fmt_keys(&kb.cursor_right)),
         ("Half Page Down", fmt_keys(&kb.half_page_down)),
         ("Half Page Up", fmt_keys(&kb.half_page_up)),
         ("Page Down", fmt_keys(&kb.page_down)),
@@ -601,6 +760,11 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
         ("Next Match", fmt_keys(&kb.search_next)),
         ("Prev Match", fmt_keys(&kb.search_prev)),
         ("Split View", fmt_keys(&kb.toggle_split_view)),
+        ("Markmap", fmt_keys(&kb.toggle_markmap)),
+        ("File Tree", fmt_keys(&kb.toggle_file_tree)),
+        ("Tree Parent", fmt_keys(&kb.file_tree_parent)),
+        ("Visual Mode", fmt_keys(&kb.toggle_visual_mode)),
+        ("Activate", "Enter".to_string()),
     ];
 
     let max_desc = entries.iter().map(|(d, _)| d.len()).max().unwrap_or(0);
@@ -644,7 +808,9 @@ fn render_frontmatter_popup(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
     };
 
     let area = frame.area();
-    let popup_w = (area.width * 80 / 100).max(30).min(area.width.saturating_sub(4));
+    let popup_w = (area.width * 80 / 100)
+        .max(30)
+        .min(area.width.saturating_sub(4));
 
     // Split value into lines for display
     let value_lines: Vec<&str> = value.lines().collect();
@@ -698,6 +864,73 @@ fn render_frontmatter_popup(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
     frame.render_widget(paragraph, popup_area);
 }
 
+fn apply_line_background<'a>(spans: &[Span<'a>], bg: ratatui::style::Color) -> Vec<Span<'a>> {
+    spans
+        .iter()
+        .map(|span| Span::styled(span.content.clone(), span.style.bg(bg)))
+        .collect()
+}
+
+fn apply_cursor_to_spans<'a>(
+    spans: &[Span<'a>],
+    cursor_col: usize,
+    theme: &ThemeConfig,
+) -> Vec<Span<'a>> {
+    let cursor_style = Style::default()
+        .fg(theme.selection_fg.0)
+        .bg(theme.selection_bg.0)
+        .add_modifier(Modifier::BOLD);
+
+    let mut result = Vec::new();
+    let mut current_col = 0usize;
+    let mut applied = false;
+
+    for span in spans {
+        let text = span.content.as_ref();
+        if text.is_empty() {
+            result.push(span.clone());
+            continue;
+        }
+
+        let mut before = String::new();
+        let mut cursor = String::new();
+        let mut after = String::new();
+
+        for ch in text.chars() {
+            let width = UnicodeWidthStr::width(ch.to_string().as_str()).max(1);
+            if !applied && cursor_col >= current_col && cursor_col < current_col + width {
+                cursor.push(ch);
+                applied = true;
+            } else if !applied && current_col + width <= cursor_col {
+                before.push(ch);
+            } else {
+                after.push(ch);
+            }
+            current_col += width;
+        }
+
+        let was_empty = before.is_empty() && cursor.is_empty() && after.is_empty();
+        if !before.is_empty() {
+            result.push(Span::styled(before, span.style));
+        }
+        if !cursor.is_empty() {
+            result.push(Span::styled(cursor, cursor_style));
+        }
+        if !after.is_empty() {
+            result.push(Span::styled(after, span.style));
+        }
+        if was_empty {
+            result.push(span.clone());
+        }
+    }
+
+    if !applied {
+        result.push(Span::styled(" ".to_string(), cursor_style));
+    }
+
+    result
+}
+
 fn highlight_search_spans<'a>(
     spans: &[Span<'a>],
     query: &str,
@@ -718,23 +951,14 @@ fn highlight_search_spans<'a>(
         for (start, _) in text_lower.match_indices(&query_lower) {
             let end = start + query.len();
             if start > last {
-                result.push(Span::styled(
-                    text[last..start].to_string(),
-                    span.style,
-                ));
+                result.push(Span::styled(text[last..start].to_string(), span.style));
             }
-            result.push(Span::styled(
-                text[start..end].to_string(),
-                highlight_style,
-            ));
+            result.push(Span::styled(text[start..end].to_string(), highlight_style));
             last = end;
         }
 
         if last < text.len() {
-            result.push(Span::styled(
-                text[last..].to_string(),
-                span.style,
-            ));
+            result.push(Span::styled(text[last..].to_string(), span.style));
         } else if last == 0 {
             result.push(span.clone());
         }
@@ -759,11 +983,8 @@ fn render_toast(frame: &mut Frame, msg: &str, theme: &ThemeConfig) {
         .bg(theme.selection_bg.0)
         .add_modifier(Modifier::BOLD);
 
-    let toast = Paragraph::new(Line::from(Span::styled(
-        format!(" {msg} "),
-        style,
-    )))
-    .alignment(Alignment::Center);
+    let toast = Paragraph::new(Line::from(Span::styled(format!(" {msg} "), style)))
+        .alignment(Alignment::Center);
 
     frame.render_widget(Clear, toast_area);
     frame.render_widget(toast, toast_area);

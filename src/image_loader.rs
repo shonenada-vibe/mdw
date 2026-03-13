@@ -12,13 +12,15 @@ pub fn load_image(source: &ImageSource, base_dir: &Path) -> Result<DynamicImage,
             } else {
                 base_dir.join(path)
             };
-            image::open(&resolved).map_err(|e| format!("Failed to open {}: {e}", resolved.display()))
+            image::open(&resolved)
+                .map_err(|e| format!("Failed to open {}: {e}", resolved.display()))
         }
         ImageSource::Remote(url) => {
             let resp = ureq::get(url)
                 .call()
                 .map_err(|e| format!("Failed to fetch {url}: {e}"))?;
-            let bytes = resp.into_body()
+            let bytes = resp
+                .into_body()
                 .read_to_vec()
                 .map_err(|e| format!("Failed to read response body: {e}"))?;
             image::load_from_memory(&bytes)
@@ -27,7 +29,11 @@ pub fn load_image(source: &ImageSource, base_dir: &Path) -> Result<DynamicImage,
     }
 }
 
-pub fn compute_display_height(img: &DynamicImage, available_cols: u16, font_size: (u16, u16)) -> u16 {
+pub fn compute_display_height(
+    img: &DynamicImage,
+    available_cols: u16,
+    font_size: (u16, u16),
+) -> u16 {
     let (img_w, img_h) = (img.width() as f64, img.height() as f64);
     let (fw, fh) = (font_size.0 as f64, font_size.1 as f64);
 
