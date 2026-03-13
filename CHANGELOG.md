@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.12.0] - 2026-03-13
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.12.0
+
+### Features
+- Add file tree panel with `t` toggle, tree navigation, and Enter-to-open files
+- Auto-open file tree when the CLI path is a directory, with welcome content before a file is selected
+- Add cursor-first navigation with highlighted line and column cursor using `h`/`j`/`k`/`l` and arrow keys
+- Add Enter activation for links and collapsible JSON/markmap/frontmatter nodes at the cursor position
+- Add vim-style visual mode with `v` for keyboard text selection and copy
+- Add `u` shortcut to move the file tree root to its parent directory
+
 ## [v0.11.0] - 2026-03-13
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.11.0
