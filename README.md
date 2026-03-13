@@ -90,6 +90,8 @@ toggle_help = ["?"]
 search_forward = ["/"]
 search_next = ["n"]
 search_prev = ["N", "shift+n"]
+toggle_split_view = ["s"]
+toggle_markmap = ["m"]
 ```
 
 Key format: `"key"`, `"ctrl+key"`, `"shift+key"`, `"alt+key"`. Special keys: `up`, `down`, `pageup`, `pagedown`, `home`, `end`, `esc`, `enter`, `space`, `tab`.
