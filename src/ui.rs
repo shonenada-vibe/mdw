@@ -749,6 +749,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
         ("Cursor Up", fmt_keys(&kb.scroll_up)),
         ("Cursor Left", fmt_keys(&kb.cursor_left)),
         ("Cursor Right", fmt_keys(&kb.cursor_right)),
+        ("Line Start", fmt_keys(&kb.cursor_line_start)),
+        ("Line End", fmt_keys(&kb.cursor_line_end)),
+        ("Next Word", fmt_keys(&kb.cursor_word_forward)),
+        ("Prev Word", fmt_keys(&kb.cursor_word_backward)),
         ("Half Page Down", fmt_keys(&kb.half_page_down)),
         ("Half Page Up", fmt_keys(&kb.half_page_up)),
         ("Page Down", fmt_keys(&kb.page_down)),
@@ -764,7 +768,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
         ("File Tree", fmt_keys(&kb.toggle_file_tree)),
         ("Tree Parent", fmt_keys(&kb.file_tree_parent)),
         ("Visual Mode", fmt_keys(&kb.toggle_visual_mode)),
-        ("Activate", "Enter".to_string()),
+        ("Activate", fmt_keys(&kb.activate)),
     ];
 
     let max_desc = entries.iter().map(|(d, _)| d.len()).max().unwrap_or(0);

@@ -75,8 +75,7 @@ impl KeyCombo {
         // For character keys, crossterm may or may not include SHIFT in modifiers
         // depending on the terminal. We handle both cases.
         match self.code {
-            KeyCode::Char(c) if c.is_ascii_uppercase() => {
-                // Accept with or without SHIFT modifier for uppercase chars
+            KeyCode::Char(_) => {
                 let base = self.modifiers - KeyModifiers::SHIFT;
                 let event_base = event.modifiers - KeyModifiers::SHIFT;
                 base == event_base
@@ -178,6 +177,10 @@ pub enum Action {
     ScrollUp,
     CursorLeft,
     CursorRight,
+    CursorLineStart,
+    CursorLineEnd,
+    CursorWordForward,
+    CursorWordBackward,
     HalfPageDown,
     HalfPageUp,
     PageDown,
@@ -192,6 +195,7 @@ pub enum Action {
     ToggleMarkmap,
     ToggleFileTree,
     FileTreeParent,
+    Activate,
     ToggleVisualMode,
 }
 
@@ -207,6 +211,10 @@ pub struct KeybindingsConfig {
     pub scroll_up: Vec<KeyCombo>,
     pub cursor_left: Vec<KeyCombo>,
     pub cursor_right: Vec<KeyCombo>,
+    pub cursor_line_start: Vec<KeyCombo>,
+    pub cursor_line_end: Vec<KeyCombo>,
+    pub cursor_word_forward: Vec<KeyCombo>,
+    pub cursor_word_backward: Vec<KeyCombo>,
     pub half_page_down: Vec<KeyCombo>,
     pub half_page_up: Vec<KeyCombo>,
     pub page_down: Vec<KeyCombo>,
@@ -221,6 +229,7 @@ pub struct KeybindingsConfig {
     pub toggle_markmap: Vec<KeyCombo>,
     pub toggle_file_tree: Vec<KeyCombo>,
     pub file_tree_parent: Vec<KeyCombo>,
+    pub activate: Vec<KeyCombo>,
     pub toggle_visual_mode: Vec<KeyCombo>,
 }
 
@@ -232,6 +241,10 @@ impl Default for KeybindingsConfig {
             scroll_up: parse_combos(&["k", "up"]),
             cursor_left: parse_combos(&["h", "left"]),
             cursor_right: parse_combos(&["l", "right"]),
+            cursor_line_start: parse_combos(&["^"]),
+            cursor_line_end: parse_combos(&["$"]),
+            cursor_word_forward: parse_combos(&["w"]),
+            cursor_word_backward: parse_combos(&["b"]),
             half_page_down: parse_combos(&["ctrl+d"]),
             half_page_up: parse_combos(&["ctrl+u"]),
             page_down: parse_combos(&["ctrl+f", "pagedown", "space"]),
@@ -246,6 +259,7 @@ impl Default for KeybindingsConfig {
             toggle_markmap: parse_combos(&["m"]),
             toggle_file_tree: parse_combos(&["t"]),
             file_tree_parent: parse_combos(&["u"]),
+            activate: parse_combos(&["enter", "o"]),
             toggle_visual_mode: parse_combos(&["v"]),
         }
     }
@@ -266,6 +280,10 @@ impl KeybindingsConfig {
             (Action::ScrollUp, &self.scroll_up),
             (Action::CursorLeft, &self.cursor_left),
             (Action::CursorRight, &self.cursor_right),
+            (Action::CursorLineStart, &self.cursor_line_start),
+            (Action::CursorLineEnd, &self.cursor_line_end),
+            (Action::CursorWordForward, &self.cursor_word_forward),
+            (Action::CursorWordBackward, &self.cursor_word_backward),
             (Action::HalfPageDown, &self.half_page_down),
             (Action::HalfPageUp, &self.half_page_up),
             (Action::PageDown, &self.page_down),
@@ -280,6 +298,7 @@ impl KeybindingsConfig {
             (Action::ToggleMarkmap, &self.toggle_markmap),
             (Action::ToggleFileTree, &self.toggle_file_tree),
             (Action::FileTreeParent, &self.file_tree_parent),
+            (Action::Activate, &self.activate),
             (Action::ToggleVisualMode, &self.toggle_visual_mode),
         ];
 
@@ -484,6 +503,10 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # scroll_up = ["k", "up"]
 # cursor_left = ["h", "left"]
 # cursor_right = ["l", "right"]
+# cursor_line_start = ["^"]
+# cursor_line_end = ["$"]
+# cursor_word_forward = ["w"]
+# cursor_word_backward = ["b"]
 # half_page_down = ["ctrl+d"]
 # half_page_up = ["ctrl+u"]
 # page_down = ["ctrl+f", "pagedown", "space"]
@@ -498,6 +521,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # toggle_markmap = ["m"]
 # toggle_file_tree = ["t"]
 # file_tree_parent = ["u"]
+# activate = ["enter", "o"]
 # toggle_visual_mode = ["v"]
 
 # [theme]
@@ -665,6 +689,12 @@ mod tests {
 
         let event = key_event(KeyCode::Char('q'), KeyModifiers::NONE);
         assert_eq!(kb.resolve_action(&event), Some(Action::Quit));
+
+        let event = key_event(KeyCode::Char('$'), KeyModifiers::SHIFT);
+        assert_eq!(kb.resolve_action(&event), Some(Action::CursorLineEnd));
+
+        let event = key_event(KeyCode::Char('o'), KeyModifiers::NONE);
+        assert_eq!(kb.resolve_action(&event), Some(Action::Activate));
 
         let event = key_event(KeyCode::Char('x'), KeyModifiers::NONE);
         assert_eq!(kb.resolve_action(&event), None);

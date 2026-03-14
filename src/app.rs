@@ -661,33 +661,6 @@ impl App {
             }
         }
 
-        if key.code == KeyCode::Enter {
-            if self.show_help {
-                self.show_help = false;
-                return;
-            }
-            if self.file_tree_view {
-                self.open_selected_tree_entry();
-            } else {
-                self.activate_cursor();
-            }
-            return;
-        }
-
-        if self.file_tree_view {
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.move_file_tree_selection(-1);
-                    return;
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.move_file_tree_selection(1);
-                    return;
-                }
-                _ => {}
-            }
-        }
-
         let Some(action) = self.config.keybindings.resolve_action(&key) else {
             if self.show_help {
                 self.show_help = false;
@@ -712,10 +685,26 @@ impl App {
 
         match action {
             Action::Quit => self.should_quit = true,
-            Action::ScrollDown => self.move_cursor_vertical(scroll_speed as isize),
-            Action::ScrollUp => self.move_cursor_vertical(-(scroll_speed as isize)),
+            Action::ScrollDown => {
+                if self.file_tree_view {
+                    self.move_file_tree_selection(scroll_speed as isize);
+                } else {
+                    self.move_cursor_vertical(scroll_speed as isize);
+                }
+            }
+            Action::ScrollUp => {
+                if self.file_tree_view {
+                    self.move_file_tree_selection(-(scroll_speed as isize));
+                } else {
+                    self.move_cursor_vertical(-(scroll_speed as isize));
+                }
+            }
             Action::CursorLeft => self.move_cursor_horizontal(-1),
             Action::CursorRight => self.move_cursor_horizontal(1),
+            Action::CursorLineStart => self.move_cursor_to_line_start(),
+            Action::CursorLineEnd => self.move_cursor_to_line_end(),
+            Action::CursorWordForward => self.move_cursor_to_next_word(),
+            Action::CursorWordBackward => self.move_cursor_to_previous_word(),
             Action::HalfPageDown => {
                 let half = (self.viewport_height / 2).max(1);
                 self.move_cursor_vertical(half as isize);
@@ -768,6 +757,13 @@ impl App {
             Action::FileTreeParent => {
                 self.go_to_parent_in_file_tree();
             }
+            Action::Activate => {
+                if self.file_tree_view {
+                    self.open_selected_tree_entry();
+                } else {
+                    self.activate_cursor();
+                }
+            }
             Action::ToggleVisualMode => {
                 self.toggle_visual_mode();
             }
@@ -808,6 +804,46 @@ impl App {
         let width = self.line_width(line) as isize;
         let next = (self.cursor_col as isize + delta).clamp(0, width.max(0)) as usize;
         self.cursor_col = next;
+        self.sync_visual_selection();
+    }
+
+    fn move_cursor_to_line_start(&mut self) {
+        if self.cursor_line.is_none() {
+            return;
+        }
+
+        self.cursor_col = 0;
+        self.sync_visual_selection();
+    }
+
+    fn move_cursor_to_line_end(&mut self) {
+        let Some(line) = self.cursor_line else {
+            return;
+        };
+
+        self.cursor_col = self.line_end_cursor_col(line);
+        self.sync_visual_selection();
+    }
+
+    fn move_cursor_to_next_word(&mut self) {
+        let Some((line, col)) = self.next_word_position() else {
+            return;
+        };
+
+        self.cursor_line = Some(line);
+        self.cursor_col = col;
+        self.ensure_cursor_visible();
+        self.sync_visual_selection();
+    }
+
+    fn move_cursor_to_previous_word(&mut self) {
+        let Some((line, col)) = self.previous_word_position() else {
+            return;
+        };
+
+        self.cursor_line = Some(line);
+        self.cursor_col = col;
+        self.ensure_cursor_visible();
         self.sync_visual_selection();
     }
 
@@ -922,6 +958,40 @@ impl App {
         if let Some(url) = self.find_link_at(line, self.cursor_col) {
             self.activate_url(url);
         }
+    }
+
+    fn next_word_position(&self) -> Option<(usize, usize)> {
+        let start_line = self.cursor_line?;
+
+        for line in start_line..self.total_lines {
+            let starts = self.word_start_cols(line);
+            if line == start_line {
+                if let Some(&col) = starts.iter().find(|&&col| col > self.cursor_col) {
+                    return Some((line, col));
+                }
+            } else if let Some(&col) = starts.first() {
+                return Some((line, col));
+            }
+        }
+
+        None
+    }
+
+    fn previous_word_position(&self) -> Option<(usize, usize)> {
+        let start_line = self.cursor_line?;
+
+        for line in (0..=start_line).rev() {
+            let starts = self.word_start_cols(line);
+            if line == start_line {
+                if let Some(&col) = starts.iter().rev().find(|&&col| col < self.cursor_col) {
+                    return Some((line, col));
+                }
+            } else if let Some(&col) = starts.last() {
+                return Some((line, col));
+            }
+        }
+
+        None
     }
 
     fn activate_url(&mut self, url: String) {
@@ -1342,6 +1412,74 @@ impl App {
         0
     }
 
+    fn line_text(&self, target_line: usize) -> Option<String> {
+        let mut line_idx = 0usize;
+
+        for block in &self.content_blocks {
+            match block {
+                ContentBlock::Text { lines } => {
+                    for line in lines {
+                        if line_idx == target_line {
+                            return Some(
+                                line.spans
+                                    .iter()
+                                    .map(|span| span.content.as_ref())
+                                    .collect(),
+                            );
+                        }
+                        line_idx += 1;
+                    }
+                }
+                ContentBlock::Image { display_height, .. } => {
+                    let height = *display_height as usize;
+                    if target_line < line_idx + height {
+                        return Some(String::new());
+                    }
+                    line_idx += height;
+                }
+            }
+        }
+
+        None
+    }
+
+    fn line_end_cursor_col(&self, target_line: usize) -> usize {
+        let Some(text) = self.line_text(target_line) else {
+            return 0;
+        };
+
+        let mut current_col = 0usize;
+        let mut last_col = 0usize;
+
+        for ch in text.chars() {
+            last_col = current_col;
+            current_col += UnicodeWidthStr::width(ch.to_string().as_str()).max(1);
+        }
+
+        if text.is_empty() { 0 } else { last_col }
+    }
+
+    fn word_start_cols(&self, target_line: usize) -> Vec<usize> {
+        let Some(text) = self.line_text(target_line) else {
+            return Vec::new();
+        };
+
+        let mut starts = Vec::new();
+        let mut current_col = 0usize;
+        let mut prev_is_word = false;
+
+        for ch in text.chars() {
+            let is_word = is_word_char(ch);
+            if is_word && !prev_is_word {
+                starts.push(current_col);
+            }
+            prev_is_word = is_word;
+            current_col += UnicodeWidthStr::width(ch.to_string().as_str()).max(1);
+        }
+
+        starts
+    }
+
     fn char_width_at(&self, target_line: usize, target_col: usize) -> Option<usize> {
         let mut line_idx = 0usize;
 
@@ -1491,6 +1629,10 @@ impl App {
             }
         }
     }
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
 }
 
 fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
