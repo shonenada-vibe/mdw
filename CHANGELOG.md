@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.12.2] - 2026-03-15
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.12.2
+
+### Features
+- Support opening image files directly (`mdw photo.png`) with png, jpg, gif, bmp, webp, tiff, pnm support
+- Add chafa-style terminal protocol detection via environment variables for Kitty, iTerm2, WezTerm, Sixel terminals
+- Use actual terminal width for image sizing instead of hardcoded 80 columns
+- Cache decoded images to avoid re-reading from disk/network on terminal resize
+
+### Fixed
+- Show red error toast (5s) instead of crashing on file watcher, reload, and file open failures
+- Fix double-nesting path bug when opening image files (e.g. `assets/assets/screenshot.jpg`)
+
 ## [v0.12.1] - 2026-03-15
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.12.1
