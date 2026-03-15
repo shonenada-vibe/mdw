@@ -104,17 +104,66 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn init_picker() -> Option<ratatui_image::picker::Picker> {
+    use ratatui_image::picker::ProtocolType;
+
     let mut picker = ratatui_image::picker::Picker::from_query_stdio()
         .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
 
-    // Sixel detection via DA1 can produce false positives on terminals that
-    // report the capability flag but don't actually render sixel images.
-    // Fall back to halfblocks which works universally.
-    if picker.protocol_type() == ratatui_image::picker::ProtocolType::Sixel {
-        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Halfblocks);
+    // Like chafa, detect the best image protocol by inspecting the terminal
+    // environment rather than relying solely on DA1 escape-sequence probing,
+    // which can produce false positives (especially for Sixel).
+    let detected = picker.protocol_type();
+    let best = detect_best_protocol();
+
+    if let Some(proto) = best {
+        // Environment-based detection is more reliable than DA1 probing
+        picker.set_protocol_type(proto);
+    } else if detected == ProtocolType::Sixel {
+        // Sixel via DA1 is unreliable; fall back to halfblocks
+        picker.set_protocol_type(ProtocolType::Halfblocks);
     }
 
     Some(picker)
+}
+
+/// Detect the best image protocol based on terminal environment variables,
+/// inspired by chafa's multi-protocol detection strategy.
+fn detect_best_protocol() -> Option<ratatui_image::picker::ProtocolType> {
+    use ratatui_image::picker::ProtocolType;
+
+    // Kitty: check KITTY_WINDOW_ID or TERM=xterm-kitty
+    if std::env::var("KITTY_WINDOW_ID").is_ok() {
+        return Some(ProtocolType::Kitty);
+    }
+    if let Ok(term) = std::env::var("TERM") {
+        if term.contains("kitty") {
+            return Some(ProtocolType::Kitty);
+        }
+    }
+
+    // iTerm2 and compatible (WezTerm, mintty)
+    if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
+        let lc = term_program.to_lowercase();
+        if lc.contains("iterm") || lc.contains("wezterm") || lc.contains("mintty") {
+            return Some(ProtocolType::Iterm2);
+        }
+    }
+
+    // WezTerm also sets its own env var
+    if std::env::var("WEZTERM_EXECUTABLE").is_ok() {
+        return Some(ProtocolType::Iterm2);
+    }
+
+    // Sixel-capable terminals detected by environment
+    if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
+        let lc = term_program.to_lowercase();
+        if lc.contains("foot") || lc.contains("contour") || lc.contains("xterm") {
+            return Some(ProtocolType::Sixel);
+        }
+    }
+
+    // No confident match; let caller decide
+    None
 }
 
 fn run_screenshot(file: PathBuf, config: config::Config, output: PathBuf) -> anyhow::Result<()> {

@@ -9,7 +9,7 @@ use ratatui_image::picker::Picker;
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::{Action, Config};
-use crate::content::ContentBlock;
+use crate::content::{ContentBlock, ImageSource};
 use crate::d2;
 use crate::event::{AppEvent, EventHandler};
 use crate::file_tree::FileTree;
@@ -39,6 +39,7 @@ pub struct App {
     is_d2: bool,
     is_mindmap: bool,
     is_yaml: bool,
+    is_image: bool,
     raw_content: String,
     content_blocks: Vec<ContentBlock>,
     total_lines: usize,
@@ -71,6 +72,7 @@ pub struct App {
     selection: Option<Selection>,
     toast_message: Option<String>,
     toast_start: Option<Instant>,
+    toast_is_error: bool,
     markmap_view: bool,
     collapsed_markmap_nodes: HashSet<String>,
     collapsed_json_nodes: HashSet<String>,
@@ -117,6 +119,7 @@ impl App {
             is_d2: false,
             is_mindmap: false,
             is_yaml: false,
+            is_image: false,
             raw_content: String::new(),
             content_blocks: Vec::new(),
             total_lines: 0,
@@ -147,6 +150,7 @@ impl App {
             selection: None,
             toast_message: None,
             toast_start: None,
+            toast_is_error: false,
             markmap_view: false,
             collapsed_markmap_nodes: HashSet::new(),
             collapsed_json_nodes: HashSet::new(),
@@ -188,6 +192,7 @@ impl App {
             is_d2: false,
             is_mindmap: false,
             is_yaml: false,
+            is_image: false,
             raw_content: String::new(),
             content_blocks: Vec::new(),
             total_lines: 0,
@@ -218,6 +223,7 @@ impl App {
             selection: None,
             toast_message: None,
             toast_start: None,
+            toast_is_error: false,
             markmap_view: false,
             collapsed_markmap_nodes: HashSet::new(),
             collapsed_json_nodes: HashSet::new(),
@@ -276,19 +282,27 @@ impl App {
             }
 
             if !self.is_stdin {
-                let current_root = self.tree_root_dir.canonicalize().with_context(|| {
-                    format!(
-                        "Failed to canonicalize path: {}",
-                        self.tree_root_dir.display()
-                    )
-                })?;
-                if watched_root.as_ref() != Some(&current_root) {
-                    _watcher_handle = Some(watcher::setup_watcher(
-                        &current_root,
-                        tx.clone(),
-                        self.config.behavior.debounce_ms,
-                    )?);
-                    watched_root = Some(current_root);
+                match self.tree_root_dir.canonicalize() {
+                    Ok(current_root) => {
+                        if watched_root.as_ref() != Some(&current_root) {
+                            match watcher::setup_watcher(
+                                &current_root,
+                                tx.clone(),
+                                self.config.behavior.debounce_ms,
+                            ) {
+                                Ok(handle) => {
+                                    _watcher_handle = Some(handle);
+                                    watched_root = Some(current_root);
+                                }
+                                Err(e) => {
+                                    self.show_error_toast(format!("File watcher error: {e}"));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.show_error_toast(format!("Path error: {e}"));
+                    }
                 }
             }
         }
@@ -306,7 +320,7 @@ impl App {
                     self.refresh_file_tree();
                     if self.has_open_file {
                         if let Err(e) = self.reload_file() {
-                            self.status_message = format!("Error: {e}");
+                            self.show_error_toast(format!("Reload failed: {e}"));
                         } else {
                             self.status_message = "Reloaded".to_string();
                         }
@@ -318,9 +332,11 @@ impl App {
             }
             AppEvent::Tick => {
                 if let Some(start) = self.toast_start {
-                    if start.elapsed() >= Duration::from_secs(2) {
+                    let timeout = if self.toast_is_error { 5 } else { 2 };
+                    if start.elapsed() >= Duration::from_secs(timeout) {
                         self.toast_message = None;
                         self.toast_start = None;
+                        self.toast_is_error = false;
                     }
                 }
             }
@@ -329,6 +345,12 @@ impl App {
 
     fn reload_file(&mut self) -> anyhow::Result<()> {
         if !self.has_open_file {
+            self.raw_content.clear();
+            self.render_content();
+            return Ok(());
+        }
+        if self.is_image {
+            // Image files are binary; skip read_to_string
             self.raw_content.clear();
             self.render_content();
             return Ok(());
@@ -357,6 +379,29 @@ impl App {
                 .into_iter()
                 .collect(),
             }];
+        } else if self.is_image {
+            // Use the filename only — base_dir is already the parent directory,
+            // so load_image will join them correctly (avoids double-nesting).
+            let image_name = self
+                .file_path
+                .file_name()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.file_path.clone());
+            let source = ImageSource::Local(image_name);
+            let alt = self
+                .file_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            self.content_blocks = vec![ContentBlock::Image {
+                alt_text: alt,
+                display_height: 1,
+                protocol: None,
+                error: None,
+                source,
+                cached_image: None,
+            }];
+            self.load_images();
         } else if self.is_markdown && self.markmap_view {
             let result = markmap::render_markmap(
                 &self.raw_content,
@@ -419,6 +464,13 @@ impl App {
         self.is_d2 = ext.is_some_and(|e| e == "d2");
         self.is_mindmap = ext.is_some_and(|e| e == "mm");
         self.is_yaml = ext.is_some_and(|e| matches!(e, "yaml" | "yml"));
+        self.is_image = ext.is_some_and(|e| {
+            matches!(
+                e.to_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "bmp" | "ico" | "tiff" | "tif" | "webp" | "pnm"
+                    | "pbm" | "pgm" | "ppm"
+            )
+        });
         self.base_dir = self
             .file_path
             .parent()
@@ -500,7 +552,7 @@ impl App {
         }
 
         if let Err(error) = self.open_file(entry.path.clone()) {
-            self.status_message = format!("Error: {error}");
+            self.show_error_toast(format!("Error: {error}"));
         }
     }
 
@@ -527,6 +579,7 @@ impl App {
                 protocol,
                 error,
                 display_height,
+                cached_image,
                 ..
             } = block
             {
@@ -534,10 +587,16 @@ impl App {
                     Ok(img) => {
                         if let Some(ref mut picker) = self.picker {
                             let font_size = picker.font_size();
-                            let cols = 80u16;
+                            let gutter_total = self.gutter_width as u16 + 3;
+                            let cols = if self.content_width > gutter_total {
+                                self.content_width - gutter_total
+                            } else {
+                                80u16
+                            };
                             *display_height =
                                 image_loader::compute_display_height(&img, cols, font_size);
-                            *protocol = Some(picker.new_resize_protocol(img));
+                            *protocol = Some(picker.new_resize_protocol(img.clone()));
+                            *cached_image = Some(img);
                         } else {
                             *error = Some("No image protocol available".to_string());
                             *display_height = 1;
@@ -557,19 +616,25 @@ impl App {
             Some(p) => p.font_size(),
             None => return,
         };
-        // Estimate available content columns (viewport width minus gutter)
-        let cols = 80u16; // Will be updated in render
+        let gutter_total = self.gutter_width as u16 + 3;
+        let cols = if self.content_width > gutter_total {
+            self.content_width - gutter_total
+        } else {
+            80u16
+        };
         for block in &mut self.content_blocks {
             if let ContentBlock::Image {
-                source,
                 display_height,
                 protocol,
+                cached_image,
                 ..
             } = block
                 && protocol.is_some()
-                && let Ok(img) = image_loader::load_image(source, &self.base_dir)
             {
-                *display_height = image_loader::compute_display_height(&img, cols, font_size);
+                if let Some(img) = cached_image.as_ref() {
+                    *display_height =
+                        image_loader::compute_display_height(img, cols, font_size);
+                }
             }
         }
         self.compute_total_lines();
@@ -1382,6 +1447,10 @@ impl App {
         self.toast_message.as_deref()
     }
 
+    pub fn toast_is_error(&self) -> bool {
+        self.toast_is_error
+    }
+
     fn line_width(&self, target_line: usize) -> usize {
         let mut line_idx = 0usize;
 
@@ -1525,6 +1594,13 @@ impl App {
     fn show_toast(&mut self, msg: String) {
         self.toast_message = Some(msg);
         self.toast_start = Some(Instant::now());
+        self.toast_is_error = false;
+    }
+
+    fn show_error_toast(&mut self, msg: String) {
+        self.toast_message = Some(msg);
+        self.toast_start = Some(Instant::now());
+        self.toast_is_error = true;
     }
 
     fn copy_selection(&mut self) {

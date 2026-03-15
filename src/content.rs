@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use image::DynamicImage;
 use ratatui::text::Line;
 use ratatui_image::protocol::StatefulProtocol;
 
@@ -14,6 +15,8 @@ pub enum ContentBlock {
         protocol: Option<StatefulProtocol>,
         error: Option<String>,
         source: ImageSource,
+        /// Cached decoded image to avoid re-reading from disk/network on resize.
+        cached_image: Option<DynamicImage>,
     },
 }
 

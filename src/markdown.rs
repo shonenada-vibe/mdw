@@ -1422,6 +1422,7 @@ impl MarkdownWriter {
                     protocol: None,
                     error: None,
                     source,
+                    cached_image: None,
                 });
                 self.block_start_row += 1; // Image takes at least 1 row initially
             }

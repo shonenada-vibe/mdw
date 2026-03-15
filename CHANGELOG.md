@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.12.1] - 2026-03-15
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.12.1
+
+### Fixed
+- Make navigation shortcuts fully configurable, including file tree navigation and activate/open actions
+
 ## [v0.12.0] - 2026-03-13
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.12.0

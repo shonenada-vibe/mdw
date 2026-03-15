@@ -2,7 +2,7 @@ use unicode_width::UnicodeWidthStr;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
@@ -69,7 +69,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Toast notification overlay (top center)
     if let Some(msg) = app.toast_message() {
-        render_toast(frame, msg, &theme);
+        render_toast(frame, msg, app.toast_is_error(), &theme);
     }
 }
 
@@ -971,7 +971,7 @@ fn highlight_search_spans<'a>(
     result
 }
 
-fn render_toast(frame: &mut Frame, msg: &str, theme: &ThemeConfig) {
+fn render_toast(frame: &mut Frame, msg: &str, is_error: bool, theme: &ThemeConfig) {
     let area = frame.area();
     let msg_width = UnicodeWidthStr::width(msg);
     let toast_w = (msg_width as u16 + 4).min(area.width);
@@ -982,10 +982,17 @@ fn render_toast(frame: &mut Frame, msg: &str, theme: &ThemeConfig) {
         height: 1,
     };
 
-    let style = Style::default()
-        .fg(theme.selection_fg.0)
-        .bg(theme.selection_bg.0)
-        .add_modifier(Modifier::BOLD);
+    let style = if is_error {
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Red)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(theme.selection_fg.0)
+            .bg(theme.selection_bg.0)
+            .add_modifier(Modifier::BOLD)
+    };
 
     let toast = Paragraph::new(Line::from(Span::styled(format!(" {msg} "), style)))
         .alignment(Alignment::Center);
