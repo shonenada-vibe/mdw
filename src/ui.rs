@@ -608,24 +608,38 @@ fn render_blocks(
                     _ => {}
                 }
 
+                // Don't render cursor over image cells — overwriting the first cell
+                // destroys Kitty protocol placeholders (and the transmission data
+                // embedded in row 0's first cell), causing a blank image.
+                // Instead, show the cursor in the gutter.
                 if cursor_line.is_some_and(|line| {
                     line >= block_start + visible_start
                         && line < block_start + visible_start + visible_rows
                 }) {
-                    let cursor_rect = Rect {
-                        x: image_rect.x,
-                        y: sy + (cursor_line.unwrap() - (block_start + visible_start)) as u16,
-                        width: 1.min(image_rect.width),
+                    let cursor_row =
+                        sy + (cursor_line.unwrap() - (block_start + visible_start)) as u16;
+                    let gutter_rect = Rect {
+                        x: content_area.x,
+                        y: cursor_row,
+                        width: gutter_total_width as u16,
                         height: 1,
                     };
-                    frame.render_widget(
-                        Paragraph::new(" ").style(
+                    let cursor_gutter = Line::from(vec![
+                        Span::styled(
+                            format!("{:>width$} ", ">", width = gutter_width),
+                            Style::default()
+                                .fg(theme.selection_fg.0)
+                                .bg(theme.selection_bg.0)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "│ ",
                             Style::default()
                                 .fg(theme.selection_fg.0)
                                 .bg(theme.selection_bg.0),
                         ),
-                        cursor_rect,
-                    );
+                    ]);
+                    frame.render_widget(Paragraph::new(cursor_gutter), gutter_rect);
                 }
             }
         }
@@ -665,8 +679,13 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConf
             .cursor_line()
             .map(|line| format!(" | {}:{}", line + 1, app.cursor_col() + 1))
             .unwrap_or_default();
+        let image_indicator = if app.is_image() {
+            format!(" [{}]{}", app.picker_info(), app.image_debug_info())
+        } else {
+            String::new()
+        };
         let scroll_info = format!(
-            " {} | {}/{}{}{}{}{} ",
+            " {} | {}/{}{}{}{}{}{} ",
             app.file_path_display(),
             app.scroll_offset() + 1,
             app.total_lines(),
@@ -674,6 +693,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConf
             tree_indicator,
             visual_indicator,
             cursor_indicator,
+            image_indicator,
         );
         Paragraph::new(Line::from(vec![
             Span::styled(

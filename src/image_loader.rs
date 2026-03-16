@@ -35,7 +35,10 @@ pub fn compute_display_height(
     font_size: (u16, u16),
 ) -> u16 {
     let (img_w, img_h) = (img.width() as f64, img.height() as f64);
-    let (fw, fh) = (font_size.0 as f64, font_size.1 as f64);
+    // Use sensible defaults if font_size detection returned zeros.
+    // Typical terminal cell: ~8x16 pixels.
+    let fw = if font_size.0 > 0 { font_size.0 as f64 } else { 8.0 };
+    let fh = if font_size.1 > 0 { font_size.1 as f64 } else { 16.0 };
 
     // Each terminal cell is fw x fh pixels
     // Available pixel width = available_cols * fw
@@ -47,5 +50,5 @@ pub fn compute_display_height(
 
     // Convert pixel height to terminal rows
     let rows = (display_px_h / fh).ceil() as u16;
-    rows.clamp(1, 30)
+    rows.clamp(1, 50)
 }

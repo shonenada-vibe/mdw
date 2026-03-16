@@ -127,16 +127,29 @@ fn init_picker() -> Option<ratatui_image::picker::Picker> {
 }
 
 /// Detect the best image protocol based on terminal environment variables,
-/// inspired by chafa's multi-protocol detection strategy.
+/// inspired by chafa's terminal detection strategy in chafa-term-db.c.
 fn detect_best_protocol() -> Option<ratatui_image::picker::ProtocolType> {
     use ratatui_image::picker::ProtocolType;
 
-    // Kitty: check KITTY_WINDOW_ID or TERM=xterm-kitty
-    if std::env::var("KITTY_WINDOW_ID").is_ok() {
+    // Ghostty: supports Kitty graphics protocol
+    // chafa checks: TERM=xterm-ghostty, TERM_PROGRAM=ghostty, GHOSTTY_BIN_DIR
+    if std::env::var("GHOSTTY_BIN_DIR").is_ok() {
         return Some(ProtocolType::Kitty);
     }
+    if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
+        if term_program.eq_ignore_ascii_case("ghostty") {
+            return Some(ProtocolType::Kitty);
+        }
+    }
+
+    // Kitty: check KITTY_WINDOW_ID, KITTY_PID, or TERM=xterm-kitty
+    if std::env::var("KITTY_WINDOW_ID").is_ok() || std::env::var("KITTY_PID").is_ok() {
+        return Some(ProtocolType::Kitty);
+    }
+
+    // TERM containing "kitty" or "ghostty" (e.g. xterm-kitty, xterm-ghostty)
     if let Ok(term) = std::env::var("TERM") {
-        if term.contains("kitty") {
+        if term.contains("kitty") || term.contains("ghostty") {
             return Some(ProtocolType::Kitty);
         }
     }

@@ -318,7 +318,7 @@ impl App {
             AppEvent::FileChanged => {
                 if !self.is_stdin {
                     self.refresh_file_tree();
-                    if self.has_open_file {
+                    if self.has_open_file && !self.is_image {
                         if let Err(e) = self.reload_file() {
                             self.show_error_toast(format!("Reload failed: {e}"));
                         } else {
@@ -1347,6 +1347,44 @@ impl App {
 
     pub fn status_message(&self) -> &str {
         &self.status_message
+    }
+
+    pub fn is_image(&self) -> bool {
+        self.is_image
+    }
+
+    pub fn picker_info(&self) -> String {
+        match &self.picker {
+            Some(p) => format!("{:?} {:?}", p.protocol_type(), p.font_size()),
+            None => "no picker".to_string(),
+        }
+    }
+
+    pub fn image_debug_info(&self) -> String {
+        if !self.is_image {
+            return String::new();
+        }
+        let block_count = self.content_blocks.len();
+        let block_info = if let Some(ContentBlock::Image {
+            display_height,
+            protocol,
+            error,
+            ..
+        }) = self.content_blocks.first()
+        {
+            format!(
+                "h={} proto={} err={}",
+                display_height,
+                if protocol.is_some() { "yes" } else { "no" },
+                error.as_deref().unwrap_or("none"),
+            )
+        } else {
+            format!("no-image-block(count={})", block_count)
+        };
+        format!(
+            " [IMG {} | blocks={} | cw={} gw={}]",
+            block_info, block_count, self.content_width, self.gutter_width,
+        )
     }
 
     pub fn set_viewport_height(&mut self, height: u16) {
