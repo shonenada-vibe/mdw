@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.14.2] - 2026-03-16
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.14.2
+
+### Fixed
+- Move image decoding and terminal image resize/encode work off the UI thread so image-heavy files no longer block the whole app while loading
+- Reduce scroll-time hangs by deferring expensive image redraw work until scrolling settles, improving responsiveness on large images and long markdown pages
+
 ## [v0.14.0] - 2026-03-16
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.14.0
