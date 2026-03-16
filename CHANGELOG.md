@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.13.0] - 2026-03-16
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.13.0
+
+### Features
+- Add Ghostty terminal detection for Kitty graphics protocol image rendering
+- Increase maximum image display height from 30 to 50 terminal rows
+- Add image protocol and rendering debug details to the status bar for diagnostics
+
+### Fixed
+- Fix blank image display on Kitty-protocol terminals by keeping the cursor indicator out of image cells
+- Skip file-watcher reload for image files to avoid breaking active image protocol state
+- Fall back to an `8x16` terminal cell size when font-size detection returns zero values
+
 ## [v0.12.2] - 2026-03-15
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.12.2
