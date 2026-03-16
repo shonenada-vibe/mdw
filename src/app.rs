@@ -1,17 +1,20 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use ratatui::DefaultTerminal;
 use ratatui_image::picker::Picker;
+use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
+use ratatui_image::{Resize, ResizeEncodeRender};
 
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::{Action, Config};
 use crate::content::{ContentBlock, ImageSource};
 use crate::d2;
-use crate::event::{AppEvent, CommandResult, EventHandler, ImageLoadResult};
+use crate::event::{AppEvent, CommandResult, EventHandler, ImageLoadResult, ImageResizeResult};
 use crate::file_tree::FileTree;
 use crate::image_loader;
 use crate::markdown;
@@ -22,6 +25,8 @@ use crate::mindmap;
 use crate::syntax_highlight;
 use crate::ui;
 use crate::watcher;
+
+const IMAGE_RENDER_DEBOUNCE_MS: u64 = 180;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConsoleStatus {
@@ -102,6 +107,7 @@ pub struct App {
     confirm_code_block_content: Option<String>,
     confirm_code_block_lang: Option<String>,
     event_tx: Option<std::sync::mpsc::Sender<AppEvent>>,
+    defer_image_render_until: Option<Instant>,
 }
 
 impl App {
@@ -195,6 +201,7 @@ impl App {
             confirm_code_block_content: None,
             confirm_code_block_lang: None,
             event_tx: None,
+            defer_image_render_until: None,
         };
 
         if app.has_open_file {
@@ -278,6 +285,7 @@ impl App {
             confirm_code_block_content: None,
             confirm_code_block_lang: None,
             event_tx: None,
+            defer_image_render_until: None,
         };
 
         app.raw_content = content;
@@ -375,6 +383,7 @@ impl App {
                 }
             }
             AppEvent::Resize => {
+                self.defer_image_render();
                 self.recompute_image_heights();
             }
             AppEvent::CommandFinished(result) => {
@@ -388,7 +397,16 @@ impl App {
             AppEvent::ImageLoaded(result) => {
                 self.handle_image_loaded(result);
             }
+            AppEvent::ImageResized(result) => {
+                self.handle_image_resized(result);
+            }
             AppEvent::Tick => {
+                if self
+                    .defer_image_render_until
+                    .is_some_and(|until| Instant::now() >= until)
+                {
+                    self.defer_image_render_until = None;
+                }
                 if let Some(start) = self.toast_start {
                     let timeout = if self.toast_is_error { 5 } else { 2 };
                     if start.elapsed() >= Duration::from_secs(timeout) {
@@ -680,8 +698,10 @@ impl App {
             return;
         }
 
-        std::thread::spawn(move || {
-            for (block_index, source) in to_load {
+        for (block_index, source) in to_load {
+            let tx = tx.clone();
+            let base_dir = base_dir.clone();
+            std::thread::spawn(move || {
                 let result = match image_loader::load_image(&source, &base_dir) {
                     Ok(img) => {
                         let height = image_loader::compute_display_height(&img, cols, font_size);
@@ -693,8 +713,8 @@ impl App {
                     block_index,
                     result,
                 }));
-            }
-        });
+            });
+        }
     }
 
     fn handle_image_loaded(&mut self, result: ImageLoadResult) {
@@ -702,6 +722,14 @@ impl App {
         if idx >= self.content_blocks.len() {
             return;
         }
+        let picker = self.picker.clone();
+        let event_tx = self.event_tx.clone();
+        let gutter_total = self.gutter_width as u16 + 3;
+        let cols = if self.content_width > gutter_total {
+            self.content_width - gutter_total
+        } else {
+            80u16
+        };
         if let ContentBlock::Image {
             display_height,
             protocol,
@@ -715,13 +743,19 @@ impl App {
             match result.result {
                 Ok((img, height)) => {
                     *display_height = height;
-                    if let Some(ref mut picker) = self.picker {
-                        *protocol = Some(picker.new_resize_protocol(img.clone()));
-                    }
+                    *protocol = Self::new_thread_protocol(
+                        idx,
+                        picker.as_ref(),
+                        event_tx.as_ref(),
+                        img.clone(),
+                        cols,
+                        height,
+                    );
                     *cached_image = Some(img);
                     *error = None;
                 }
                 Err(e) => {
+                    *protocol = None;
                     *error = Some(e);
                     *display_height = 1;
                 }
@@ -729,6 +763,61 @@ impl App {
         }
         self.fixup_code_block_offsets();
         self.compute_total_lines();
+    }
+
+    fn new_thread_protocol(
+        block_index: usize,
+        picker: Option<&Picker>,
+        event_tx: Option<&std::sync::mpsc::Sender<AppEvent>>,
+        img: image::DynamicImage,
+        cols: u16,
+        height: u16,
+    ) -> Option<ThreadProtocol> {
+        let (picker, event_tx) = match (picker, event_tx) {
+            (Some(picker), Some(event_tx)) => (picker, event_tx.clone()),
+            _ => return None,
+        };
+
+        let (tx_worker, rx_worker) = mpsc::channel::<ResizeRequest>();
+        std::thread::spawn(move || {
+            while let Ok(request) = rx_worker.recv() {
+                let result = request.resize_encode().map_err(|e| e.to_string());
+                let _ = event_tx.send(AppEvent::ImageResized(ImageResizeResult {
+                    block_index,
+                    result,
+                }));
+            }
+        });
+
+        let mut protocol = ThreadProtocol::new(tx_worker, Some(picker.new_resize_protocol(img)));
+        protocol.resize_encode(
+            &Resize::Crop(None),
+            ratatui::layout::Rect::new(0, 0, cols.max(1), height.max(1)),
+        );
+        Some(protocol)
+    }
+
+    fn handle_image_resized(&mut self, result: ImageResizeResult) {
+        let idx = result.block_index;
+        if idx >= self.content_blocks.len() {
+            return;
+        }
+        if let ContentBlock::Image {
+            protocol, error, ..
+        } = &mut self.content_blocks[idx]
+        {
+            match result.result {
+                Ok(response) => {
+                    if let Some(protocol) = protocol.as_mut() {
+                        let _ = protocol.update_resized_protocol(response);
+                    }
+                    *error = None;
+                }
+                Err(e) => {
+                    *error = Some(format!("Failed to render image: {e}"));
+                }
+            }
+        }
     }
 
     fn fixup_code_block_offsets(&mut self) {
@@ -790,11 +879,9 @@ impl App {
         for block in &mut self.content_blocks {
             if let ContentBlock::Image {
                 display_height,
-                protocol,
                 cached_image,
                 ..
             } = block
-                && protocol.is_some()
             {
                 if let Some(img) = cached_image.as_ref() {
                     *display_height =
@@ -828,6 +915,8 @@ impl App {
 
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
+
+        let before_scroll = self.scroll_offset;
 
         if self.confirm_prompt.is_some() {
             match key.code {
@@ -1032,6 +1121,10 @@ impl App {
             Action::ToggleConsole => {
                 self.console_visible = !self.console_visible;
             }
+        }
+
+        if self.scroll_offset != before_scroll {
+            self.defer_image_render();
         }
     }
 
@@ -1503,12 +1596,20 @@ impl App {
     }
 
     fn scroll_down(&mut self, lines: usize) {
+        let before = self.scroll_offset;
         self.scroll_offset = self.scroll_offset.saturating_add(lines as u16);
         self.clamp_scroll();
+        if self.scroll_offset != before {
+            self.defer_image_render();
+        }
     }
 
     fn scroll_up(&mut self, lines: usize) {
+        let before = self.scroll_offset;
         self.scroll_offset = self.scroll_offset.saturating_sub(lines as u16);
+        if self.scroll_offset != before {
+            self.defer_image_render();
+        }
     }
 
     fn clamp_scroll(&mut self) {
@@ -1885,6 +1986,16 @@ impl App {
     pub fn set_content_area(&mut self, x: u16, width: u16) {
         self.content_x = x;
         self.content_width = width;
+    }
+
+    pub fn defer_image_render(&mut self) {
+        self.defer_image_render_until =
+            Some(Instant::now() + Duration::from_millis(IMAGE_RENDER_DEBOUNCE_MS));
+    }
+
+    pub fn should_defer_image_render(&self) -> bool {
+        self.defer_image_render_until
+            .is_some_and(|until| Instant::now() < until)
     }
 
     pub fn show_help(&self) -> bool {

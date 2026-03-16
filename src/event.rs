@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event as CrosstermEvent, KeyEventKind, MouseEvent};
 use image::DynamicImage;
+use ratatui_image::thread::ResizeResponse;
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -14,6 +15,7 @@ pub enum AppEvent {
     Resize,
     CommandFinished(CommandResult),
     ImageLoaded(ImageLoadResult),
+    ImageResized(ImageResizeResult),
 }
 
 #[derive(Debug)]
@@ -32,6 +34,20 @@ impl std::fmt::Debug for ImageLoadResult {
         f.debug_struct("ImageLoadResult")
             .field("block_index", &self.block_index)
             .field("result", &self.result.as_ref().map(|(_, h)| h).map_err(|e| e.clone()))
+            .finish()
+    }
+}
+
+pub struct ImageResizeResult {
+    pub block_index: usize,
+    pub result: Result<ResizeResponse, String>,
+}
+
+impl std::fmt::Debug for ImageResizeResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageResizeResult")
+            .field("block_index", &self.block_index)
+            .field("result", &self.result.as_ref().map(|_| "ok").map_err(|e| e.clone()))
             .finish()
     }
 }

@@ -7,7 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
-use ratatui_image::StatefulImage;
+use ratatui_image::thread::ThreadProtocol;
+use ratatui_image::{Resize, StatefulImage};
 
 use crate::config::ThemeConfig;
 use crate::content::ContentBlock;
@@ -396,6 +397,7 @@ fn render_blocks(
     let viewport_h = content_area.height as usize;
     let mut visual_line_map: Vec<Option<usize>> = vec![None; viewport_h];
     let cursor_line_bg = theme.code_block_bg.0;
+    let defer_image_render = app.should_defer_image_render();
 
     for vb in visible_blocks {
         let block_start = vb.block_start;
@@ -417,14 +419,19 @@ fn render_blocks(
             match &blocks[block_idx] {
                 ContentBlock::Text { .. } => BlockKind::Text,
                 ContentBlock::Image {
-                    protocol: Some(_), ..
-                } => BlockKind::ImageWithProtocol,
+                    error: Some(err), ..
+                } => BlockKind::ImageWithError(err.clone()),
                 ContentBlock::Image {
                     loading: true, ..
                 } => BlockKind::ImageLoading,
+                ContentBlock::Image { .. } if defer_image_render => BlockKind::ImageLoading,
                 ContentBlock::Image {
-                    error: Some(err), ..
-                } => BlockKind::ImageWithError(err.clone()),
+                    protocol: Some(protocol),
+                    ..
+                } if protocol.protocol_type().is_some() => BlockKind::ImageWithProtocol,
+                ContentBlock::Image {
+                    protocol: Some(_), ..
+                } => BlockKind::ImageLoading,
                 ContentBlock::Image { alt_text, .. } => {
                     let alt = if alt_text.is_empty() {
                         "[Image]".to_string()
@@ -621,14 +628,19 @@ fn render_blocks(
                             ..
                         } = &mut blocks_mut[block_idx]
                         {
-                            let image_widget = StatefulImage::default();
+                            let image_widget =
+                                StatefulImage::<ThreadProtocol>::default().resize(Resize::Crop(None));
                             frame.render_stateful_widget(image_widget, image_rect, proto);
                         }
                     }
                     BlockKind::ImageLoading => {
                         let loading_style = Style::default().fg(theme.blockquote.0);
-                        let loading_line =
-                            Line::from(Span::styled("Loading image...", loading_style));
+                        let loading_text = if defer_image_render {
+                            "Scrolling..."
+                        } else {
+                            "Preparing image..."
+                        };
+                        let loading_line = Line::from(Span::styled(loading_text, loading_style));
                         frame.render_widget(Paragraph::new(loading_line), image_rect);
                     }
                     BlockKind::ImageWithError(ref err) => {

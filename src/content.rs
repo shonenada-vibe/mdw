@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use image::DynamicImage;
 use ratatui::text::Line;
-use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::thread::ThreadProtocol;
 
 #[allow(clippy::large_enum_variant)]
 pub enum ContentBlock {
@@ -12,7 +12,7 @@ pub enum ContentBlock {
     Image {
         alt_text: String,
         display_height: u16,
-        protocol: Option<StatefulProtocol>,
+        protocol: Option<ThreadProtocol>,
         error: Option<String>,
         source: ImageSource,
         /// Cached decoded image to avoid re-reading from disk/network on resize.
