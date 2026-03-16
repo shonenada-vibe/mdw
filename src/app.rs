@@ -290,6 +290,7 @@ impl App {
 
         let (event_handler, tx) = EventHandler::new(Duration::from_millis(250));
         self.event_tx = Some(tx.clone());
+        self.start_image_loading();
 
         let mut watched_root = if self.is_stdin {
             None
@@ -647,6 +648,10 @@ impl App {
             Some(p) => p.font_size(),
             None => return,
         };
+        let tx = match &self.event_tx {
+            Some(tx) => tx.clone(),
+            None => return,
+        };
         let gutter_total = self.gutter_width as u16 + 3;
         let cols = if self.content_width > gutter_total {
             self.content_width - gutter_total
@@ -674,11 +679,6 @@ impl App {
         if to_load.is_empty() {
             return;
         }
-
-        let tx = match &self.event_tx {
-            Some(tx) => tx.clone(),
-            None => return,
-        };
 
         std::thread::spawn(move || {
             for (block_index, source) in to_load {
