@@ -11,17 +11,25 @@ use unicode_width::UnicodeWidthStr;
 use crate::config::{Action, Config};
 use crate::content::{ContentBlock, ImageSource};
 use crate::d2;
-use crate::event::{AppEvent, EventHandler};
+use crate::event::{AppEvent, CommandResult, EventHandler};
 use crate::file_tree::FileTree;
 use crate::image_loader;
 use crate::markdown;
-use crate::markdown::LinkInfo;
+use crate::markdown::{CodeBlockInfo, LinkInfo};
 use crate::markmap;
 use crate::mermaid;
 use crate::mindmap;
 use crate::syntax_highlight;
 use crate::ui;
 use crate::watcher;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConsoleStatus {
+    Idle,
+    Running,
+    Success,
+    Error,
+}
 
 #[derive(Clone, Debug)]
 pub struct Selection {
@@ -84,6 +92,16 @@ pub struct App {
     cursor_col: usize,
     visual_mode: bool,
     visual_anchor: (usize, usize),
+    code_block_infos: Vec<CodeBlockInfo>,
+    console_visible: bool,
+    console_output: String,
+    console_status: ConsoleStatus,
+    console_scroll: u16,
+    console_command: String,
+    confirm_prompt: Option<String>,
+    confirm_code_block_content: Option<String>,
+    confirm_code_block_lang: Option<String>,
+    event_tx: Option<std::sync::mpsc::Sender<AppEvent>>,
 }
 
 impl App {
@@ -162,6 +180,16 @@ impl App {
             cursor_col: 0,
             visual_mode: false,
             visual_anchor: (0, 0),
+            code_block_infos: Vec::new(),
+            console_visible: false,
+            console_output: String::new(),
+            console_status: ConsoleStatus::Idle,
+            console_scroll: 0,
+            console_command: String::new(),
+            confirm_prompt: None,
+            confirm_code_block_content: None,
+            confirm_code_block_lang: None,
+            event_tx: None,
         };
 
         if app.has_open_file {
@@ -235,6 +263,16 @@ impl App {
             cursor_col: 0,
             visual_mode: false,
             visual_anchor: (0, 0),
+            code_block_infos: Vec::new(),
+            console_visible: false,
+            console_output: String::new(),
+            console_status: ConsoleStatus::Idle,
+            console_scroll: 0,
+            console_command: String::new(),
+            confirm_prompt: None,
+            confirm_code_block_content: None,
+            confirm_code_block_lang: None,
+            event_tx: None,
         };
 
         app.raw_content = content;
@@ -246,6 +284,7 @@ impl App {
         crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
 
         let (event_handler, tx) = EventHandler::new(Duration::from_millis(250));
+        self.event_tx = Some(tx.clone());
 
         let mut watched_root = if self.is_stdin {
             None
@@ -329,6 +368,14 @@ impl App {
             }
             AppEvent::Resize => {
                 self.recompute_image_heights();
+            }
+            AppEvent::CommandFinished(result) => {
+                self.console_output = result.output;
+                self.console_status = if result.success {
+                    ConsoleStatus::Success
+                } else {
+                    ConsoleStatus::Error
+                };
             }
             AppEvent::Tick => {
                 if let Some(start) = self.toast_start {
@@ -414,7 +461,7 @@ impl App {
             }];
             self.link_infos = result.link_infos;
         } else if self.is_markdown {
-            let (blocks, links, footnote_defs, fm_entries) = markdown::render_markdown(
+            let (blocks, links, footnote_defs, fm_entries, cb_infos) = markdown::render_markdown(
                 &self.raw_content,
                 &self.config.theme,
                 &self.collapsed_markmap_nodes,
@@ -423,8 +470,11 @@ impl App {
             self.link_infos = links;
             self.footnote_def_lines = footnote_defs;
             self.frontmatter_entries = fm_entries;
+            self.code_block_infos = cb_infos;
             self.load_images();
+            self.fixup_code_block_offsets();
         } else {
+            self.code_block_infos.clear();
             let text = if self.is_json {
                 let result = markdown::render_json(
                     &self.raw_content,
@@ -611,6 +661,51 @@ impl App {
         }
     }
 
+    fn fixup_code_block_offsets(&mut self) {
+        if self.code_block_infos.is_empty() {
+            return;
+        }
+        // Recompute absolute line indices for each code block by walking the
+        // content blocks and matching code block content against rendered lines.
+        // This handles image display_height changes after load_images / resize.
+        let mut abs_row: usize = 0;
+        let mut cb_idx = 0;
+        for block in &self.content_blocks {
+            match block {
+                ContentBlock::Text { lines } => {
+                    if cb_idx < self.code_block_infos.len() {
+                        // Check if any code block content appears in this text block
+                        for (i, line) in lines.iter().enumerate() {
+                            let text: String =
+                                line.spans.iter().map(|s| s.content.as_ref()).collect();
+                            // Code blocks are rendered with 2-space indent
+                            let trimmed = text.strip_prefix("  ").unwrap_or(&text);
+                            if cb_idx < self.code_block_infos.len() {
+                                let cb = &self.code_block_infos[cb_idx];
+                                let first_line = cb.content.lines().next().unwrap_or("");
+                                if !first_line.is_empty() && trimmed == first_line {
+                                    let content_lines = cb.content.lines().count().max(1);
+                                    // code_content ends with \n, so split('\n') adds an
+                                    // extra trailing empty item — mirror what the renderer does.
+                                    let rendered_lines = cb.content.split('\n').count();
+                                    let line_count = rendered_lines.max(content_lines);
+                                    self.code_block_infos[cb_idx].start_line = abs_row + i;
+                                    self.code_block_infos[cb_idx].end_line =
+                                        abs_row + i + line_count - 1;
+                                    cb_idx += 1;
+                                }
+                            }
+                        }
+                    }
+                    abs_row += lines.len();
+                }
+                ContentBlock::Image { display_height, .. } => {
+                    abs_row += *display_height as usize;
+                }
+            }
+        }
+    }
+
     fn recompute_image_heights(&mut self) {
         let font_size = match &self.picker {
             Some(p) => p.font_size(),
@@ -641,6 +736,7 @@ impl App {
         self.clamp_scroll();
         self.clamp_cursor();
         self.sync_visual_selection();
+        self.fixup_code_block_offsets();
     }
 
     fn compute_total_lines(&mut self) {
@@ -662,6 +758,26 @@ impl App {
 
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
+
+        if self.confirm_prompt.is_some() {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.confirm_prompt = None;
+                    let content = self.confirm_code_block_content.take();
+                    let lang = self.confirm_code_block_lang.take();
+                    if let Some(content) = content {
+                        self.execute_code(lang.as_deref(), &content);
+                    }
+                }
+                _ => {
+                    self.confirm_prompt = None;
+                    self.confirm_code_block_content = None;
+                    self.confirm_code_block_lang = None;
+                    self.show_toast("Cancelled".to_string());
+                }
+            }
+            return;
+        }
 
         if self.search_mode {
             match key.code {
@@ -716,6 +832,10 @@ impl App {
         }
 
         if key.code == KeyCode::Esc {
+            if self.console_visible {
+                self.console_visible = false;
+                return;
+            }
             if self.visual_mode {
                 self.clear_visual_mode();
                 return;
@@ -831,6 +951,12 @@ impl App {
             }
             Action::ToggleVisualMode => {
                 self.toggle_visual_mode();
+            }
+            Action::RunCodeBlock => {
+                self.run_code_block();
+            }
+            Action::ToggleConsole => {
+                self.console_visible = !self.console_visible;
             }
         }
     }
@@ -1320,6 +1446,280 @@ impl App {
         self.scroll_offset = self.scroll_offset.min(max_scroll);
     }
 
+    fn find_code_block_at_cursor(&self) -> Option<&CodeBlockInfo> {
+        let line = self.cursor_line?;
+        self.code_block_infos
+            .iter()
+            .find(|cb| line >= cb.start_line && line <= cb.end_line)
+    }
+
+    fn run_code_block(&mut self) {
+        let Some(cb) = self.find_code_block_at_cursor().cloned() else {
+            self.show_toast("Not inside a code block".to_string());
+            return;
+        };
+
+        let lang = cb.lang.as_deref().unwrap_or("");
+        if !Self::is_supported_lang(lang) {
+            self.show_error_toast(format!("Unsupported language: {}", if lang.is_empty() { "(none)" } else { lang }));
+            return;
+        }
+
+        if self.config.runners.confirm_before_run {
+            let display_lang = if lang.is_empty() { "code" } else { lang };
+            self.confirm_prompt = Some(format!("Run this {} code? [y/N]", display_lang));
+            self.confirm_code_block_content = Some(cb.content.clone());
+            self.confirm_code_block_lang = cb.lang.clone();
+            return;
+        }
+
+        self.execute_code(cb.lang.as_deref(), &cb.content);
+    }
+
+    fn is_supported_lang(lang: &str) -> bool {
+        matches!(
+            lang,
+            "sh" | "bash" | "python" | "py" | "javascript" | "js" | "ruby" | "rb" | "go" | "rust"
+        )
+    }
+
+    fn execute_code(&mut self, lang: Option<&str>, content: &str) {
+        let lang = lang.unwrap_or("sh");
+        self.console_status = ConsoleStatus::Running;
+        self.console_output = "Running...".to_string();
+        self.console_visible = true;
+        self.console_scroll = 0;
+
+        let Some(tx) = self.event_tx.clone() else {
+            self.show_error_toast("No event channel available".to_string());
+            self.console_status = ConsoleStatus::Error;
+            return;
+        };
+
+        let user_runners = self.config.runners.runners.clone();
+        let lang = lang.to_string();
+        let content = content.to_string();
+
+        // Build command description for the console header
+        self.console_command = match lang.as_str() {
+            "sh" | "bash" => {
+                let cmd = user_runners.get(&lang).cloned().unwrap_or_else(|| "sh".into());
+                format!("{cmd} -c '<code block>'")
+            }
+            "python" | "py" => {
+                let cmd = user_runners.get(&lang)
+                    .or_else(|| user_runners.get("python"))
+                    .cloned()
+                    .unwrap_or_else(|| "python3".into());
+                format!("{cmd} <<'CODE'")
+            }
+            "javascript" | "js" => {
+                let cmd = user_runners.get(&lang)
+                    .or_else(|| user_runners.get("javascript"))
+                    .cloned()
+                    .unwrap_or_else(|| "node".into());
+                format!("{cmd} -e '<code block>'")
+            }
+            "ruby" | "rb" => {
+                let cmd = user_runners.get(&lang)
+                    .or_else(|| user_runners.get("ruby"))
+                    .cloned()
+                    .unwrap_or_else(|| "ruby".into());
+                format!("{cmd} -e '<code block>'")
+            }
+            "go" => "go run <temp file>".into(),
+            "rust" => "rustc <temp file> && <output>".into(),
+            _ => lang.clone(),
+        };
+
+        std::thread::spawn(move || {
+            let result = Self::run_command_blocking(&lang, &content, &user_runners);
+            let _ = tx.send(AppEvent::CommandFinished(result));
+        });
+    }
+
+    fn run_command_blocking(
+        lang: &str,
+        content: &str,
+        user_runners: &std::collections::HashMap<String, String>,
+    ) -> CommandResult {
+        let output_result = match lang {
+            "sh" | "bash" => {
+                let cmd = user_runners.get(lang).map(|s| s.as_str()).unwrap_or("sh");
+                std::process::Command::new(cmd)
+                    .arg("-c")
+                    .arg(content)
+                    .stdin(std::process::Stdio::null())
+                    .output()
+            }
+            "python" | "py" => {
+                let cmd = user_runners.get(lang)
+                    .or_else(|| user_runners.get("python"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("python3");
+                std::process::Command::new(cmd)
+                    .arg("-c")
+                    .arg(content)
+                    .stdin(std::process::Stdio::null())
+                    .output()
+            }
+            "javascript" | "js" => {
+                let cmd = user_runners.get(lang)
+                    .or_else(|| user_runners.get("javascript"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("node");
+                std::process::Command::new(cmd)
+                    .arg("-e")
+                    .arg(content)
+                    .stdin(std::process::Stdio::null())
+                    .output()
+            }
+            "ruby" | "rb" => {
+                let cmd = user_runners.get(lang)
+                    .or_else(|| user_runners.get("ruby"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("ruby");
+                std::process::Command::new(cmd)
+                    .arg("-e")
+                    .arg(content)
+                    .stdin(std::process::Stdio::null())
+                    .output()
+            }
+            "go" => {
+                return Self::run_tempfile_blocking(content, "go", ".go", &["go", "run"], user_runners);
+            }
+            "rust" => {
+                return Self::run_rust_blocking(content, user_runners);
+            }
+            _ => {
+                return CommandResult {
+                    output: format!("Unsupported language: {lang}"),
+                    success: false,
+                };
+            }
+        };
+
+        Self::process_output(output_result)
+    }
+
+    fn run_tempfile_blocking(
+        content: &str,
+        lang: &str,
+        ext: &str,
+        cmd_parts: &[&str],
+        user_runners: &std::collections::HashMap<String, String>,
+    ) -> CommandResult {
+        let tmp_dir = std::env::temp_dir();
+        let filename = format!("mdw_run_{}{}", std::process::id(), ext);
+        let tmp_file = tmp_dir.join(&filename);
+
+        if let Err(e) = std::fs::write(&tmp_file, content) {
+            return CommandResult {
+                output: format!("Failed to write temp file: {e}"),
+                success: false,
+            };
+        }
+
+        let result = if let Some(custom_cmd) = user_runners.get(lang) {
+            let expanded = custom_cmd
+                .replace("{file}", &tmp_file.display().to_string())
+                .replace("{out}", &tmp_file.with_extension("").display().to_string());
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&expanded)
+                .stdin(std::process::Stdio::null())
+                .output()
+        } else {
+            let mut cmd = std::process::Command::new(cmd_parts[0]);
+            for part in &cmd_parts[1..] {
+                cmd.arg(part);
+            }
+            cmd.stdin(std::process::Stdio::null());
+            cmd.arg(&tmp_file).output()
+        };
+
+        let _ = std::fs::remove_file(&tmp_file);
+        Self::process_output(result)
+    }
+
+    fn run_rust_blocking(
+        content: &str,
+        user_runners: &std::collections::HashMap<String, String>,
+    ) -> CommandResult {
+        let tmp_dir = std::env::temp_dir();
+        let src_file = tmp_dir.join(format!("mdw_run_{}.rs", std::process::id()));
+        let out_file = tmp_dir.join(format!("mdw_run_{}", std::process::id()));
+
+        if let Err(e) = std::fs::write(&src_file, content) {
+            return CommandResult {
+                output: format!("Failed to write temp file: {e}"),
+                success: false,
+            };
+        }
+
+        let result = if let Some(custom_cmd) = user_runners.get("rust") {
+            let expanded = custom_cmd
+                .replace("{file}", &src_file.display().to_string())
+                .replace("{out}", &out_file.display().to_string());
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&expanded)
+                .stdin(std::process::Stdio::null())
+                .output()
+        } else {
+            let compile = std::process::Command::new("rustc")
+                .arg(&src_file)
+                .arg("-o")
+                .arg(&out_file)
+                .stdin(std::process::Stdio::null())
+                .output();
+
+            match compile {
+                Ok(compile_out) if compile_out.status.success() => {
+                    std::process::Command::new(&out_file)
+                        .stdin(std::process::Stdio::null())
+                        .output()
+                }
+                Ok(compile_out) => Ok(compile_out),
+                Err(e) => Err(e),
+            }
+        };
+
+        let _ = std::fs::remove_file(&src_file);
+        let _ = std::fs::remove_file(&out_file);
+        Self::process_output(result)
+    }
+
+    fn process_output(result: std::io::Result<std::process::Output>) -> CommandResult {
+        match result {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let mut combined = String::new();
+                if !stdout.is_empty() {
+                    combined.push_str(&stdout);
+                }
+                if !stderr.is_empty() {
+                    if !combined.is_empty() {
+                        combined.push('\n');
+                    }
+                    combined.push_str(&stderr);
+                }
+                if combined.is_empty() {
+                    combined = "(no output)".to_string();
+                }
+                CommandResult {
+                    output: combined,
+                    success: output.status.success(),
+                }
+            }
+            Err(e) => CommandResult {
+                output: format!("Failed to execute: {e}"),
+                success: false,
+            },
+        }
+    }
+
     // Accessors for ui.rs
     pub fn content_blocks(&self) -> &[ContentBlock] {
         &self.content_blocks
@@ -1487,6 +1887,26 @@ impl App {
 
     pub fn toast_is_error(&self) -> bool {
         self.toast_is_error
+    }
+
+    pub fn console_visible(&self) -> bool {
+        self.console_visible
+    }
+
+    pub fn console_output(&self) -> &str {
+        &self.console_output
+    }
+
+    pub fn console_status(&self) -> &ConsoleStatus {
+        &self.console_status
+    }
+
+    pub fn console_command(&self) -> &str {
+        &self.console_command
+    }
+
+    pub fn confirm_prompt(&self) -> Option<&str> {
+        self.confirm_prompt.as_deref()
     }
 
     fn line_width(&self, target_line: usize) -> usize {

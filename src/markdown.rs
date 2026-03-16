@@ -23,6 +23,14 @@ pub struct LinkInfo {
     pub url: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct CodeBlockInfo {
+    pub lang: Option<String>,
+    pub content: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
 pub struct JsonRenderResult {
     pub text: Text<'static>,
     pub link_infos: Vec<LinkInfo>,
@@ -781,6 +789,7 @@ pub fn render_markdown(
     Vec<LinkInfo>,
     HashMap<String, usize>,
     Vec<(String, String)>,
+    Vec<CodeBlockInfo>,
 ) {
     let (frontmatter_lines, fm_entries, fm_link_infos, md_input) =
         if let Some((fm_raw, rest)) = extract_frontmatter(input) {
@@ -813,8 +822,8 @@ pub fn render_markdown(
         writer.handle_event(event);
     }
 
-    let (blocks, link_infos, footnote_defs) = writer.finish();
-    (blocks, link_infos, footnote_defs, fm_entries)
+    let (blocks, link_infos, footnote_defs, code_block_infos) = writer.finish();
+    (blocks, link_infos, footnote_defs, fm_entries, code_block_infos)
 }
 
 enum ListKind {
@@ -856,6 +865,7 @@ struct MarkdownWriter {
     in_footnote_def: bool,
     current_footnote_label: Option<String>,
     collapsed_markmap_nodes: HashSet<String>,
+    code_block_infos: Vec<CodeBlockInfo>,
 }
 
 impl MarkdownWriter {
@@ -891,6 +901,7 @@ impl MarkdownWriter {
             in_footnote_def: false,
             current_footnote_label: None,
             collapsed_markmap_nodes,
+            code_block_infos: Vec::new(),
         }
     }
 
@@ -1304,6 +1315,8 @@ impl MarkdownWriter {
                     Some("mermaid") | Some("d2") | Some("mindmap") | Some("markmap")
                 );
 
+                let code_block_start_line = self.block_start_row + self.lines.len();
+
                 if is_diagram {
                     let rendered = match lang.as_deref() {
                         Some("mermaid") => mermaid::render_mermaid(&code_content, &self.theme),
@@ -1361,6 +1374,16 @@ impl MarkdownWriter {
                             .push(Line::from(Span::styled(format!("  {line}"), code_style)));
                     }
                 }
+                if !is_diagram {
+                    let code_block_end_line = self.block_start_row + self.lines.len().saturating_sub(1);
+                    self.code_block_infos.push(CodeBlockInfo {
+                        lang: lang.clone(),
+                        content: code_content.clone(),
+                        start_line: code_block_start_line,
+                        end_line: code_block_end_line,
+                    });
+                }
+
                 self.in_code_block = false;
                 self.push_blank_line();
             }
@@ -1455,8 +1478,190 @@ impl MarkdownWriter {
         }
     }
 
-    fn finish(mut self) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>) {
+    fn finish(mut self) -> (Vec<ContentBlock>, Vec<LinkInfo>, HashMap<String, usize>, Vec<CodeBlockInfo>) {
         self.flush_text_block();
-        (self.blocks, self.link_infos, self.footnote_def_lines)
+        (self.blocks, self.link_infos, self.footnote_def_lines, self.code_block_infos)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_code_block_info_line_tracking() {
+        let input = r#"# Hello
+
+Some text.
+
+```sh
+echo hello
+```
+
+More text.
+
+```toml
+[section]
+key = "value"
+```
+"#;
+        let theme = ThemeConfig::default();
+        let collapsed = HashSet::new();
+        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed);
+
+        assert_eq!(cb_infos.len(), 2, "should have 2 code blocks");
+
+        let sh_cb = &cb_infos[0];
+        assert_eq!(sh_cb.lang.as_deref(), Some("sh"));
+
+        let toml_cb = &cb_infos[1];
+        assert_eq!(toml_cb.lang.as_deref(), Some("toml"));
+
+        // Verify ranges don't overlap
+        assert!(sh_cb.end_line < toml_cb.start_line, 
+            "sh block ({}..{}) should end before toml block ({}..{})",
+            sh_cb.start_line, sh_cb.end_line, toml_cb.start_line, toml_cb.end_line);
+
+        // Verify the sh code block's line range actually contains "echo hello" content
+        // by checking the rendered text at those line indices
+        let mut line_idx = 0;
+        let mut sh_text_found = false;
+        for block in &blocks {
+            if let ContentBlock::Text { lines } = block {
+                for line in lines {
+                    if line_idx >= sh_cb.start_line && line_idx <= sh_cb.end_line {
+                        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                        if text.contains("echo") {
+                            sh_text_found = true;
+                        }
+                    }
+                    line_idx += 1;
+                }
+            }
+        }
+        assert!(sh_text_found, "sh code block line range should contain 'echo hello'");
+    }
+
+    #[test]
+    fn test_code_block_info_with_images() {
+        let input = r#"# Hello
+
+![logo](logo.png)
+
+Some text.
+
+```sh
+echo hello
+```
+
+More text.
+
+```toml
+[section]
+key = "value"
+```
+"#;
+        let theme = ThemeConfig::default();
+        let collapsed = HashSet::new();
+        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed);
+
+        assert_eq!(cb_infos.len(), 2, "should have 2 code blocks");
+        let sh_cb = &cb_infos[0];
+        assert_eq!(sh_cb.lang.as_deref(), Some("sh"));
+
+        let mut idx = 0;
+        let mut sh_text_found = false;
+        for block in &blocks {
+            match block {
+                ContentBlock::Text { lines } => {
+                    for line in lines {
+                        if idx >= sh_cb.start_line && idx <= sh_cb.end_line {
+                            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                            if text.contains("echo") {
+                                sh_text_found = true;
+                            }
+                        }
+                        idx += 1;
+                    }
+                }
+                ContentBlock::Image { display_height, .. } => {
+                    idx += *display_height as usize;
+                }
+            }
+        }
+        assert!(sh_text_found, 
+            "sh code block range ({}..{}) should contain 'echo hello' but doesn't", 
+            sh_cb.start_line, sh_cb.end_line);
+    }
+
+    #[test]
+    fn test_code_block_with_images_and_multiple_blocks() {
+        let input = r#"<p align="center">
+  <img src="assets/logo.svg" alt="mdw logo" width="480">
+</p>
+
+## Screenshot
+
+![screenshot](assets/screenshot.jpg)
+
+## Installation
+
+### Homebrew
+
+```sh
+brew tap shonenada/tap
+brew install shonenada/tap/mdw
+```
+
+### From source
+
+```sh
+cargo install --path .
+```
+
+## Configuration
+
+### Keybindings
+
+```toml
+[keybindings]
+quit = ["q", "ctrl+c"]
+```
+"#;
+        let theme = ThemeConfig::default();
+        let collapsed = HashSet::new();
+        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed);
+
+        let brew_cb = cb_infos.iter().find(|cb| cb.content.contains("brew")).unwrap();
+        assert_eq!(brew_cb.lang.as_deref(), Some("sh"));
+
+        let mut idx = 0;
+        let mut brew_line = None;
+        for block in &blocks {
+            match block {
+                ContentBlock::Text { lines } => {
+                    for line in lines {
+                        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                        if text.contains("brew tap") {
+                            brew_line = Some(idx);
+                        }
+                        idx += 1;
+                    }
+                }
+                ContentBlock::Image { display_height, .. } => {
+                    idx += *display_height as usize;
+                }
+            }
+        }
+        let brew_line = brew_line.expect("should find 'brew tap' line");
+
+        assert!(brew_line >= brew_cb.start_line && brew_line <= brew_cb.end_line,
+            "'brew tap' at line {} should be in sh block range {}..{}", 
+            brew_line, brew_cb.start_line, brew_cb.end_line);
+
+        let toml_cb = cb_infos.iter().find(|cb| cb.lang.as_deref() == Some("toml")).unwrap();
+        assert!(!(brew_line >= toml_cb.start_line && brew_line <= toml_cb.end_line),
+            "'brew tap' at line {} should NOT be in toml block range {}..{}", 
+            brew_line, toml_cb.start_line, toml_cb.end_line);
     }
 }

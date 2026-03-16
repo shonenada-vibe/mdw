@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -197,6 +198,8 @@ pub enum Action {
     FileTreeParent,
     Activate,
     ToggleVisualMode,
+    RunCodeBlock,
+    ToggleConsole,
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +234,8 @@ pub struct KeybindingsConfig {
     pub file_tree_parent: Vec<KeyCombo>,
     pub activate: Vec<KeyCombo>,
     pub toggle_visual_mode: Vec<KeyCombo>,
+    pub run_code_block: Vec<KeyCombo>,
+    pub toggle_console: Vec<KeyCombo>,
 }
 
 impl Default for KeybindingsConfig {
@@ -261,6 +266,8 @@ impl Default for KeybindingsConfig {
             file_tree_parent: parse_combos(&["u"]),
             activate: parse_combos(&["enter", "o"]),
             toggle_visual_mode: parse_combos(&["v"]),
+            run_code_block: parse_combos(&["r"]),
+            toggle_console: parse_combos(&["ctrl+t"]),
         }
     }
 }
@@ -300,6 +307,8 @@ impl KeybindingsConfig {
             (Action::FileTreeParent, &self.file_tree_parent),
             (Action::Activate, &self.activate),
             (Action::ToggleVisualMode, &self.toggle_visual_mode),
+            (Action::RunCodeBlock, &self.run_code_block),
+            (Action::ToggleConsole, &self.toggle_console),
         ];
 
         for (action, combos) in bindings {
@@ -432,6 +441,26 @@ impl Default for BehaviorConfig {
 }
 
 // ---------------------------------------------------------------------------
+// RunnersConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct RunnersConfig {
+    pub runners: HashMap<String, String>,
+    pub confirm_before_run: bool,
+}
+
+impl Default for RunnersConfig {
+    fn default() -> Self {
+        Self {
+            runners: HashMap::new(),
+            confirm_before_run: true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
@@ -441,6 +470,7 @@ pub struct Config {
     pub keybindings: KeybindingsConfig,
     pub theme: ThemeConfig,
     pub behavior: BehaviorConfig,
+    pub runners: RunnersConfig,
 }
 
 impl Config {
@@ -523,6 +553,8 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # file_tree_parent = ["u"]
 # activate = ["enter", "o"]
 # toggle_visual_mode = ["v"]
+# run_code_block = ["r"]
+# toggle_console = ["ctrl+t"]
 
 # [theme]
 # Colors can be named colors or hex "#rrggbb".
@@ -575,6 +607,16 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # debounce_ms = 200
 # scroll_speed = 1
 # mouse_scroll = true
+
+# [runners]
+# confirm_before_run = true
+# Custom language runners (override built-in defaults):
+# [runners.runners]
+# python = "python3"
+# javascript = "node"
+# ruby = "ruby"
+# go = "go run {file}"
+# rust = "rustc {file} -o {out} && {out}"
 "##;
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,13 @@ pub enum AppEvent {
     FileChanged,
     Tick,
     Resize,
+    CommandFinished(CommandResult),
+}
+
+#[derive(Debug)]
+pub struct CommandResult {
+    pub output: String,
+    pub success: bool,
 }
 
 pub struct EventHandler {

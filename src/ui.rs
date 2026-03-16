@@ -12,7 +12,7 @@ use ratatui_image::StatefulImage;
 use crate::config::ThemeConfig;
 use crate::content::ContentBlock;
 
-use crate::app::{App, Selection};
+use crate::app::{App, ConsoleStatus, Selection};
 
 struct VisibleBlock {
     block_idx: usize,
@@ -28,10 +28,21 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
-    app.set_viewport_height(chunks[0].height);
-
     let theme = app.config().theme.clone();
-    let body_area = chunks[0];
+
+    let (body_area, console_area) = if app.console_visible() {
+        let console_height = (chunks[0].height / 3).clamp(5, 10);
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(console_height)])
+            .split(chunks[0]);
+        (split[0], Some(split[1]))
+    } else {
+        (chunks[0], None)
+    };
+
+    app.set_viewport_height(body_area.height);
+
     let content_area = if app.file_tree_view() {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
@@ -54,6 +65,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
     frame.render_stateful_widget(scrollbar, content_area, &mut scrollbar_state);
 
+    // Console panel
+    if let Some(console_area) = console_area {
+        render_console_panel(frame, app, console_area, &theme);
+    }
+
     // Status bar
     render_status_bar(frame, app, chunks[1], &theme);
 
@@ -70,6 +86,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Toast notification overlay (top center)
     if let Some(msg) = app.toast_message() {
         render_toast(frame, msg, app.toast_is_error(), &theme);
+    }
+
+    // Confirmation prompt overlay
+    if let Some(prompt) = app.confirm_prompt() {
+        render_toast(frame, prompt, false, &theme);
     }
 }
 
@@ -714,7 +735,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConf
 fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
     let area = frame.area();
     let help_w = 50u16.min(area.width.saturating_sub(4));
-    let help_h = 24u16.min(area.height.saturating_sub(4));
+    let help_h = 28u16.min(area.height.saturating_sub(4));
     let help_area = Rect {
         x: (area.width.saturating_sub(help_w)) / 2,
         y: (area.height.saturating_sub(help_h)) / 2,
@@ -789,6 +810,8 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
         ("Tree Parent", fmt_keys(&kb.file_tree_parent)),
         ("Visual Mode", fmt_keys(&kb.toggle_visual_mode)),
         ("Activate", fmt_keys(&kb.activate)),
+        ("Run Code Block", fmt_keys(&kb.run_code_block)),
+        ("Toggle Console", fmt_keys(&kb.toggle_console)),
     ];
 
     let max_desc = entries.iter().map(|(d, _)| d.len()).max().unwrap_or(0);
@@ -989,6 +1012,64 @@ fn highlight_search_spans<'a>(
     }
 
     result
+}
+
+fn render_console_panel(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConfig) {
+    let status_label = match app.console_status() {
+        ConsoleStatus::Idle => "Console",
+        ConsoleStatus::Running => "Console [Running...]",
+        ConsoleStatus::Success => "Console [✓ Success]",
+        ConsoleStatus::Error => "Console [✗ Error]",
+    };
+
+    let border_color = match app.console_status() {
+        ConsoleStatus::Error => Color::Red,
+        ConsoleStatus::Success => Color::Green,
+        _ => theme.status_bar_fg.0,
+    };
+
+    let block = Block::default()
+        .title(format!(" {} ", status_label))
+        .borders(Borders::ALL)
+        .style(Style::default().fg(border_color));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let cmd = app.console_command();
+    let output = app.console_output();
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    if !cmd.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("$ {cmd}"),
+            Style::default()
+                .fg(theme.heading2.0)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    for line in output.lines() {
+        let style = if app.console_status() == &ConsoleStatus::Error {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default().fg(theme.status_bar_fg.0)
+        };
+        lines.push(Line::from(Span::styled(line.to_string(), style)));
+    }
+
+    let total_lines = lines.len() as u16;
+    let scroll = total_lines.saturating_sub(inner.height);
+
+    let paragraph = Paragraph::new(lines)
+        .scroll((scroll, 0))
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(paragraph, inner);
 }
 
 fn render_toast(frame: &mut Frame, msg: &str, is_error: bool, theme: &ThemeConfig) {
