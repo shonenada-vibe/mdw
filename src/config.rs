@@ -199,6 +199,7 @@ pub enum Action {
     Activate,
     ToggleVisualMode,
     RunCodeBlock,
+    RunCodeBlockSh,
     ToggleConsole,
 }
 
@@ -235,6 +236,7 @@ pub struct KeybindingsConfig {
     pub activate: Vec<KeyCombo>,
     pub toggle_visual_mode: Vec<KeyCombo>,
     pub run_code_block: Vec<KeyCombo>,
+    pub run_code_block_sh: Vec<KeyCombo>,
     pub toggle_console: Vec<KeyCombo>,
 }
 
@@ -267,6 +269,7 @@ impl Default for KeybindingsConfig {
             activate: parse_combos(&["enter", "o"]),
             toggle_visual_mode: parse_combos(&["v"]),
             run_code_block: parse_combos(&["r"]),
+            run_code_block_sh: parse_combos(&["ctrl+r"]),
             toggle_console: parse_combos(&["ctrl+t"]),
         }
     }
@@ -308,6 +311,7 @@ impl KeybindingsConfig {
             (Action::Activate, &self.activate),
             (Action::ToggleVisualMode, &self.toggle_visual_mode),
             (Action::RunCodeBlock, &self.run_code_block),
+            (Action::RunCodeBlockSh, &self.run_code_block_sh),
             (Action::ToggleConsole, &self.toggle_console),
         ];
 
@@ -554,6 +558,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # activate = ["enter", "o"]
 # toggle_visual_mode = ["v"]
 # run_code_block = ["r"]
+# run_code_block_sh = ["ctrl+r"]
 # toggle_console = ["ctrl+t"]
 
 # [theme]

@@ -955,6 +955,9 @@ impl App {
             Action::RunCodeBlock => {
                 self.run_code_block();
             }
+            Action::RunCodeBlockSh => {
+                self.run_code_block_as_sh();
+            }
             Action::ToggleConsole => {
                 self.console_visible = !self.console_visible;
             }
@@ -1474,6 +1477,22 @@ impl App {
         }
 
         self.execute_code(cb.lang.as_deref(), &cb.content);
+    }
+
+    fn run_code_block_as_sh(&mut self) {
+        let Some(cb) = self.find_code_block_at_cursor().cloned() else {
+            self.show_toast("Not inside a code block".to_string());
+            return;
+        };
+
+        if self.config.runners.confirm_before_run {
+            self.confirm_prompt = Some("Run this code as sh? [y/N]".to_string());
+            self.confirm_code_block_content = Some(cb.content.clone());
+            self.confirm_code_block_lang = Some("sh".to_string());
+            return;
+        }
+
+        self.execute_code(Some("sh"), &cb.content);
     }
 
     fn is_supported_lang(lang: &str) -> bool {

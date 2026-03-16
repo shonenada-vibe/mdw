@@ -811,6 +811,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
         ("Visual Mode", fmt_keys(&kb.toggle_visual_mode)),
         ("Activate", fmt_keys(&kb.activate)),
         ("Run Code Block", fmt_keys(&kb.run_code_block)),
+        ("Run as Shell", fmt_keys(&kb.run_code_block_sh)),
         ("Toggle Console", fmt_keys(&kb.toggle_console)),
     ];
 
