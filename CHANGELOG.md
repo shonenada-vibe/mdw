@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.14.0] - 2026-03-16
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.14.0
+
+### Features
+- Add code block execution: press `r` to run code block under cursor, with language-aware runners
+- Add `ctrl+r` shortcut to run any code block as shell script regardless of language tag
+- Add console output panel (`ctrl+t` to toggle) showing execution results with success/error status
+- Add configurable runners for Python, JavaScript, Ruby, Go, and Rust with `{file}`/`{out}` placeholders
+- Add `confirm_before_run` option (default: true) to prompt before executing code blocks
+- Add async image loading to avoid blocking the UI while images are decoded
+- Add file tree expand/collapse: click or press Enter on directories to toggle, with ▸/▾ indicators
+- Lazy file tree loading: only read directory contents when the panel is opened or a directory is expanded
+
+### Improved
+- File tree preserves expanded state on refresh
+- Only refresh file tree on file change events when the panel is visible
+
 ## [v0.13.0] - 2026-03-16
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.13.0
