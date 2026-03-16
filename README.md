@@ -23,6 +23,7 @@
 - Cursor-first navigation with vim-style keys (`h`/`j`/`k`/`l`, `g`/`G`, `ctrl+d`/`ctrl+u`)
 - File tree panel with directory browsing (`t`, `u`, Enter)
 - Visual selection and copy (`v`)
+- Code block execution with console output panel (`r`, `ctrl+r`)
 - Fully configurable keybindings, theme colors, and behavior via TOML
 - Scrollbar, status bar, and help panel (`?`)
 
@@ -107,6 +108,9 @@ toggle_file_tree = ["t"]
 file_tree_parent = ["u"]
 activate = ["enter", "o"]
 toggle_visual_mode = ["v"]
+run_code_block = ["r"]
+run_code_block_sh = ["ctrl+r"]
+toggle_console = ["ctrl+t"]
 ```
 
 Key format: `"key"`, `"ctrl+key"`, `"shift+key"`, `"alt+key"`. Special keys: `up`, `down`, `pageup`, `pagedown`, `home`, `end`, `esc`, `enter`, `space`, `tab`.
@@ -122,6 +126,9 @@ Key format: `"key"`, `"ctrl+key"`, `"shift+key"`, `"alt+key"`. Special keys: `up
 | `u` | Move file tree root to parent directory |
 | `v` | Toggle visual mode; press again to copy selection |
 | `/`, `n`, `N` | Search and jump between matches |
+| `r` | Run code block under cursor |
+| `ctrl+r` | Run code block as shell |
+| `ctrl+t` | Toggle console panel |
 | `?` | Show help |
 
 ### Theme
@@ -165,6 +172,30 @@ scroll_speed = 1
 | `line_wrap` | Wrap long lines | `true` |
 | `debounce_ms` | File watcher debounce interval (ms) | `200` |
 | `scroll_speed` | Lines to scroll per `j`/`k` press | `1` |
+| `mouse_scroll` | Enable mouse scroll | `true` |
+
+### Runners
+
+```toml
+[runners]
+confirm_before_run = true
+
+[runners.runners]
+python = "python3"
+javascript = "node"
+ruby = "ruby"
+go = "go run {file}"
+rust = "rustc {file} -o {out} && {out}"
+```
+
+| Option | Description | Default |
+|---|---|---|
+| `confirm_before_run` | Show confirmation prompt before executing | `true` |
+| `runners.<lang>` | Custom command for a language | built-in defaults |
+
+Supported languages: `sh`, `bash`, `python`/`py`, `javascript`/`js`, `ruby`/`rb`, `go`, `rust`.
+
+For `go` and `rust` runners, use `{file}` and `{out}` placeholders for the temp source file and output binary paths.
 
 ## License
 

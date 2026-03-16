@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::config::{Action, Config};
 use crate::content::{ContentBlock, ImageSource};
 use crate::d2;
-use crate::event::{AppEvent, CommandResult, EventHandler};
+use crate::event::{AppEvent, CommandResult, EventHandler, ImageLoadResult};
 use crate::file_tree::FileTree;
 use crate::image_loader;
 use crate::markdown;
@@ -116,6 +116,7 @@ impl App {
             path.clone()
         } else {
             path.parent()
+                .filter(|p| !p.as_os_str().is_empty())
                 .map(|parent| parent.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."))
         };
@@ -124,8 +125,12 @@ impl App {
         } else {
             path
         };
-        let file_tree = FileTree::read(tree_root_dir.clone())
-            .unwrap_or_else(|_| FileTree::empty(tree_root_dir.clone()));
+        let file_tree = if start_in_file_tree {
+            FileTree::read(tree_root_dir.clone())
+                .unwrap_or_else(|_| FileTree::empty(tree_root_dir.clone()))
+        } else {
+            FileTree::empty(tree_root_dir.clone())
+        };
 
         let mut app = App {
             file_path: initial_file_path,
@@ -356,7 +361,9 @@ impl App {
             AppEvent::Mouse(mouse) => self.handle_mouse(mouse),
             AppEvent::FileChanged => {
                 if !self.is_stdin {
-                    self.refresh_file_tree();
+                    if self.file_tree_view {
+                        self.refresh_file_tree();
+                    }
                     if self.has_open_file && !self.is_image {
                         if let Err(e) = self.reload_file() {
                             self.show_error_toast(format!("Reload failed: {e}"));
@@ -376,6 +383,9 @@ impl App {
                 } else {
                     ConsoleStatus::Error
                 };
+            }
+            AppEvent::ImageLoaded(result) => {
+                self.handle_image_loaded(result);
             }
             AppEvent::Tick => {
                 if let Some(start) = self.toast_start {
@@ -447,8 +457,9 @@ impl App {
                 error: None,
                 source,
                 cached_image: None,
+                loading: false,
             }];
-            self.load_images();
+            self.start_image_loading();
         } else if self.is_markdown && self.markmap_view {
             let result = markmap::render_markmap(
                 &self.raw_content,
@@ -471,7 +482,7 @@ impl App {
             self.footnote_def_lines = footnote_defs;
             self.frontmatter_entries = fm_entries;
             self.code_block_infos = cb_infos;
-            self.load_images();
+            self.start_image_loading();
             self.fixup_code_block_offsets();
         } else {
             self.code_block_infos.clear();
@@ -532,8 +543,12 @@ impl App {
     }
 
     fn refresh_file_tree(&mut self) {
-        self.file_tree = FileTree::read(self.tree_root_dir.clone())
-            .unwrap_or_else(|_| FileTree::empty(self.tree_root_dir.clone()));
+        if self.file_tree.is_empty() {
+            self.file_tree = FileTree::read(self.tree_root_dir.clone())
+                .unwrap_or_else(|_| FileTree::empty(self.tree_root_dir.clone()));
+        } else {
+            self.file_tree.refresh();
+        }
         self.select_active_file_in_tree();
     }
 
@@ -583,9 +598,12 @@ impl App {
         }
 
         self.tree_root_dir = parent;
-        self.refresh_file_tree();
+        self.file_tree = FileTree::read(self.tree_root_dir.clone())
+            .unwrap_or_else(|_| FileTree::empty(self.tree_root_dir.clone()));
         if let Some(index) = self.file_tree.find_path(&previous_root) {
             self.file_tree_selected = index;
+        } else {
+            self.select_active_file_in_tree();
         }
         self.scroll_file_tree_to_top();
         self.status_message = format!("Tree root: {}", self.tree_root_dir.display());
@@ -597,7 +615,9 @@ impl App {
         };
 
         if entry.is_dir {
-            self.status_message = format!("Directory: {}", entry.path.display());
+            let path = entry.path.clone();
+            self.file_tree.toggle_expand(&path);
+            self.ensure_file_tree_selection_visible();
             return;
         }
 
@@ -622,43 +642,93 @@ impl App {
         Ok(())
     }
 
-    fn load_images(&mut self) {
-        for block in &mut self.content_blocks {
+    fn start_image_loading(&mut self) {
+        let font_size = match &self.picker {
+            Some(p) => p.font_size(),
+            None => return,
+        };
+        let gutter_total = self.gutter_width as u16 + 3;
+        let cols = if self.content_width > gutter_total {
+            self.content_width - gutter_total
+        } else {
+            80u16
+        };
+        let base_dir = self.base_dir.clone();
+
+        // Collect image blocks that need loading
+        let mut to_load: Vec<(usize, ImageSource)> = Vec::new();
+        for (idx, block) in self.content_blocks.iter_mut().enumerate() {
             if let ContentBlock::Image {
-                source,
-                protocol,
-                error,
-                display_height,
-                cached_image,
-                ..
+                source, loading, ..
             } = block
             {
-                match image_loader::load_image(source, &self.base_dir) {
+                let source_clone = match source {
+                    ImageSource::Local(p) => ImageSource::Local(p.clone()),
+                    ImageSource::Remote(u) => ImageSource::Remote(u.clone()),
+                };
+                *loading = true;
+                to_load.push((idx, source_clone));
+            }
+        }
+
+        if to_load.is_empty() {
+            return;
+        }
+
+        let tx = match &self.event_tx {
+            Some(tx) => tx.clone(),
+            None => return,
+        };
+
+        std::thread::spawn(move || {
+            for (block_index, source) in to_load {
+                let result = match image_loader::load_image(&source, &base_dir) {
                     Ok(img) => {
-                        if let Some(ref mut picker) = self.picker {
-                            let font_size = picker.font_size();
-                            let gutter_total = self.gutter_width as u16 + 3;
-                            let cols = if self.content_width > gutter_total {
-                                self.content_width - gutter_total
-                            } else {
-                                80u16
-                            };
-                            *display_height =
-                                image_loader::compute_display_height(&img, cols, font_size);
-                            *protocol = Some(picker.new_resize_protocol(img.clone()));
-                            *cached_image = Some(img);
-                        } else {
-                            *error = Some("No image protocol available".to_string());
-                            *display_height = 1;
-                        }
+                        let height = image_loader::compute_display_height(&img, cols, font_size);
+                        Ok((img, height))
                     }
-                    Err(e) => {
-                        *error = Some(e);
-                        *display_height = 1;
+                    Err(e) => Err(e),
+                };
+                let _ = tx.send(AppEvent::ImageLoaded(ImageLoadResult {
+                    block_index,
+                    result,
+                }));
+            }
+        });
+    }
+
+    fn handle_image_loaded(&mut self, result: ImageLoadResult) {
+        let idx = result.block_index;
+        if idx >= self.content_blocks.len() {
+            return;
+        }
+        if let ContentBlock::Image {
+            display_height,
+            protocol,
+            error,
+            cached_image,
+            loading,
+            ..
+        } = &mut self.content_blocks[idx]
+        {
+            *loading = false;
+            match result.result {
+                Ok((img, height)) => {
+                    *display_height = height;
+                    if let Some(ref mut picker) = self.picker {
+                        *protocol = Some(picker.new_resize_protocol(img.clone()));
                     }
+                    *cached_image = Some(img);
+                    *error = None;
+                }
+                Err(e) => {
+                    *error = Some(e);
+                    *display_height = 1;
                 }
             }
         }
+        self.fixup_code_block_offsets();
+        self.compute_total_lines();
     }
 
     fn fixup_code_block_offsets(&mut self) {
@@ -667,7 +737,7 @@ impl App {
         }
         // Recompute absolute line indices for each code block by walking the
         // content blocks and matching code block content against rendered lines.
-        // This handles image display_height changes after load_images / resize.
+        // This handles image display_height changes after start_image_loading / resize.
         let mut abs_row: usize = 0;
         let mut cb_idx = 0;
         for block in &self.content_blocks {
@@ -936,6 +1006,7 @@ impl App {
             Action::ToggleFileTree => {
                 self.file_tree_view = !self.file_tree_view;
                 if self.file_tree_view {
+                    self.refresh_file_tree();
                     self.scroll_file_tree_to_top();
                 }
             }

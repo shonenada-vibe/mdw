@@ -128,7 +128,12 @@ fn render_file_tree_panel(frame: &mut Frame, app: &App, area: Rect, theme: &Them
             let marker = if index == selected { ">" } else { " " };
             let indent = "  ".repeat(entry.depth);
             let label = if entry.is_dir {
-                format!("{}/", entry.name)
+                let arrow = if app.file_tree().is_expanded(&entry.path) {
+                    "▾ "
+                } else {
+                    "▸ "
+                };
+                format!("{arrow}{}/", entry.name)
             } else {
                 entry.name.clone()
             };
@@ -402,6 +407,7 @@ fn render_blocks(
         enum BlockKind {
             Text,
             ImageWithProtocol,
+            ImageLoading,
             ImageWithError(String),
             ImageFallback(String),
         }
@@ -413,6 +419,9 @@ fn render_blocks(
                 ContentBlock::Image {
                     protocol: Some(_), ..
                 } => BlockKind::ImageWithProtocol,
+                ContentBlock::Image {
+                    loading: true, ..
+                } => BlockKind::ImageLoading,
                 ContentBlock::Image {
                     error: Some(err), ..
                 } => BlockKind::ImageWithError(err.clone()),
@@ -560,6 +569,7 @@ fn render_blocks(
                 }
             }
             BlockKind::ImageWithProtocol
+            | BlockKind::ImageLoading
             | BlockKind::ImageWithError(_)
             | BlockKind::ImageFallback(_) => {
                 for row in 0..visible_rows {
@@ -614,6 +624,12 @@ fn render_blocks(
                             let image_widget = StatefulImage::default();
                             frame.render_stateful_widget(image_widget, image_rect, proto);
                         }
+                    }
+                    BlockKind::ImageLoading => {
+                        let loading_style = Style::default().fg(theme.blockquote.0);
+                        let loading_line =
+                            Line::from(Span::styled("Loading image...", loading_style));
+                        frame.render_widget(Paragraph::new(loading_line), image_rect);
                     }
                     BlockKind::ImageWithError(ref err) => {
                         let err_text = format!("[Image Error: {err}]");

@@ -17,6 +17,8 @@ pub enum ContentBlock {
         source: ImageSource,
         /// Cached decoded image to avoid re-reading from disk/network on resize.
         cached_image: Option<DynamicImage>,
+        /// Whether the image is currently being loaded in the background.
+        loading: bool,
     },
 }
 

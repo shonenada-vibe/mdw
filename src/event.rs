@@ -3,6 +3,7 @@ use std::thread;
 use std::time::Duration;
 
 use crossterm::event::{self, Event as CrosstermEvent, KeyEventKind, MouseEvent};
+use image::DynamicImage;
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -12,12 +13,27 @@ pub enum AppEvent {
     Tick,
     Resize,
     CommandFinished(CommandResult),
+    ImageLoaded(ImageLoadResult),
 }
 
 #[derive(Debug)]
 pub struct CommandResult {
     pub output: String,
     pub success: bool,
+}
+
+pub struct ImageLoadResult {
+    pub block_index: usize,
+    pub result: Result<(DynamicImage, u16), String>,
+}
+
+impl std::fmt::Debug for ImageLoadResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageLoadResult")
+            .field("block_index", &self.block_index)
+            .field("result", &self.result.as_ref().map(|(_, h)| h).map_err(|e| e.clone()))
+            .finish()
+    }
 }
 
 pub struct EventHandler {
