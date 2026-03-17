@@ -763,7 +763,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConf
 fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
     let area = frame.area();
     let help_w = 50u16.min(area.width.saturating_sub(4));
-    let help_h = 28u16.min(area.height.saturating_sub(4));
+    let help_h = 34u16.min(area.height.saturating_sub(4));
     let help_area = Rect {
         x: (area.width.saturating_sub(help_w)) / 2,
         y: (area.height.saturating_sub(help_h)) / 2,
@@ -837,9 +837,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
         ("File Tree", fmt_keys(&kb.toggle_file_tree)),
         ("Tree Parent", fmt_keys(&kb.file_tree_parent)),
         ("Visual Mode", fmt_keys(&kb.toggle_visual_mode)),
+        ("Visual Line", fmt_keys(&kb.toggle_visual_line_mode)),
         ("Activate", fmt_keys(&kb.activate)),
+        ("Run as Bash", fmt_keys(&kb.run_code_block_sh)),
         ("Run Code Block", fmt_keys(&kb.run_code_block)),
-        ("Run as Shell", fmt_keys(&kb.run_code_block_sh)),
         ("Toggle Console", fmt_keys(&kb.toggle_console)),
     ];
 

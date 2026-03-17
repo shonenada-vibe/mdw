@@ -96,6 +96,7 @@ pub struct App {
     cursor_line: Option<usize>,
     cursor_col: usize,
     visual_mode: bool,
+    visual_line_mode: bool,
     visual_anchor: (usize, usize),
     code_block_infos: Vec<CodeBlockInfo>,
     console_visible: bool,
@@ -190,6 +191,7 @@ impl App {
             cursor_line: None,
             cursor_col: 0,
             visual_mode: false,
+            visual_line_mode: false,
             visual_anchor: (0, 0),
             code_block_infos: Vec::new(),
             console_visible: false,
@@ -274,6 +276,7 @@ impl App {
             cursor_line: None,
             cursor_col: 0,
             visual_mode: false,
+            visual_line_mode: false,
             visual_anchor: (0, 0),
             code_block_infos: Vec::new(),
             console_visible: false,
@@ -1112,6 +1115,9 @@ impl App {
             Action::ToggleVisualMode => {
                 self.toggle_visual_mode();
             }
+            Action::ToggleVisualLineMode => {
+                self.toggle_visual_line_mode();
+            }
             Action::RunCodeBlock => {
                 self.run_code_block();
             }
@@ -1252,6 +1258,7 @@ impl App {
         if self.visual_mode {
             self.copy_selection();
             self.visual_mode = false;
+            self.visual_line_mode = false;
             self.selection = None;
             return;
         }
@@ -1261,8 +1268,28 @@ impl App {
         self.sync_visual_selection();
     }
 
+    fn toggle_visual_line_mode(&mut self) {
+        let Some(line) = self.cursor_line else {
+            return;
+        };
+
+        if self.visual_mode {
+            self.copy_selection();
+            self.visual_mode = false;
+            self.visual_line_mode = false;
+            self.selection = None;
+            return;
+        }
+
+        self.visual_mode = true;
+        self.visual_line_mode = true;
+        self.visual_anchor = (line, 0);
+        self.sync_visual_selection();
+    }
+
     fn clear_visual_mode(&mut self) {
         self.visual_mode = false;
+        self.visual_line_mode = false;
         self.selection = None;
     }
 
@@ -1276,8 +1303,22 @@ impl App {
             return;
         };
 
-        let cursor = (line, self.cursor_col);
-        self.selection = Some(self.build_visual_selection(self.visual_anchor, cursor));
+        if self.visual_line_mode {
+            let anchor_line = self.visual_anchor.0;
+            let (start_line, end_line) = if line < anchor_line {
+                (line, anchor_line)
+            } else {
+                (anchor_line, line)
+            };
+            let end_col = self.line_width(end_line);
+            self.selection = Some(Selection {
+                start: (start_line, 0),
+                end: (end_line, end_col),
+            });
+        } else {
+            let cursor = (line, self.cursor_col);
+            self.selection = Some(self.build_visual_selection(self.visual_anchor, cursor));
+        }
     }
 
     fn build_visual_selection(&self, anchor: (usize, usize), cursor: (usize, usize)) -> Selection {
@@ -1652,30 +1693,64 @@ impl App {
     }
 
     fn run_code_block_as_sh(&mut self) {
+        // If in visual mode with a selection, run the selected text as bash
+        if self.visual_mode && self.selection.is_some() {
+            let text = self.extract_selected_text();
+            if text.is_empty() {
+                self.show_toast("Selection is empty".to_string());
+                return;
+            }
+            self.visual_mode = false;
+            self.visual_line_mode = false;
+            self.selection = None;
+
+            if self.config.runners.confirm_before_run {
+                self.confirm_prompt = Some("Run selection as bash? [y/N]".to_string());
+                self.confirm_code_block_content = Some(text);
+                self.confirm_code_block_lang = Some("bash".to_string());
+                return;
+            }
+
+            self.execute_code(Some("bash"), &text);
+            return;
+        }
+
         let Some(cb) = self.find_code_block_at_cursor().cloned() else {
             self.show_toast("Not inside a code block".to_string());
             return;
         };
 
         if self.config.runners.confirm_before_run {
-            self.confirm_prompt = Some("Run this code as sh? [y/N]".to_string());
+            self.confirm_prompt = Some("Run this code as bash? [y/N]".to_string());
             self.confirm_code_block_content = Some(cb.content.clone());
-            self.confirm_code_block_lang = Some("sh".to_string());
+            self.confirm_code_block_lang = Some("bash".to_string());
             return;
         }
 
-        self.execute_code(Some("sh"), &cb.content);
+        self.execute_code(Some("bash"), &cb.content);
     }
 
     fn is_supported_lang(lang: &str) -> bool {
         matches!(
             lang,
-            "sh" | "bash" | "python" | "py" | "javascript" | "js" | "ruby" | "rb" | "go" | "rust"
+            "sh" | "bash" | "shell" | "python" | "py" | "javascript" | "js" | "ruby" | "rb" | "go" | "rust"
         )
     }
 
+    fn truncate_preview(s: &str, max_len: usize) -> String {
+        let first_line = s.lines().next().unwrap_or("");
+        if first_line.len() <= max_len {
+            format!("{first_line} ...")
+        } else {
+            format!("{}...", &first_line[..max_len])
+        }
+    }
+
     fn execute_code(&mut self, lang: Option<&str>, content: &str) {
-        let lang = lang.unwrap_or("sh");
+        let lang = match lang.unwrap_or("bash") {
+            "shell" => "bash",
+            other => other,
+        };
         self.console_status = ConsoleStatus::Running;
         self.console_output = "Running...".to_string();
         self.console_visible = true;
@@ -1692,31 +1767,48 @@ impl App {
         let content = content.to_string();
 
         // Build command description for the console header
+        let code_preview = content.trim();
         self.console_command = match lang.as_str() {
             "sh" | "bash" => {
-                let cmd = user_runners.get(&lang).cloned().unwrap_or_else(|| "sh".into());
-                format!("{cmd} -c '<code block>'")
+                let cmd = user_runners.get(&lang).cloned().unwrap_or_else(|| "bash".into());
+                if code_preview.contains('\n') {
+                    format!("{cmd} -c '{}'", Self::truncate_preview(code_preview, 120))
+                } else {
+                    format!("{cmd} -c '{code_preview}'")
+                }
             }
             "python" | "py" => {
                 let cmd = user_runners.get(&lang)
                     .or_else(|| user_runners.get("python"))
                     .cloned()
                     .unwrap_or_else(|| "python3".into());
-                format!("{cmd} <<'CODE'")
+                if code_preview.contains('\n') {
+                    format!("{cmd} -c '{}'", Self::truncate_preview(code_preview, 120))
+                } else {
+                    format!("{cmd} -c '{code_preview}'")
+                }
             }
             "javascript" | "js" => {
                 let cmd = user_runners.get(&lang)
                     .or_else(|| user_runners.get("javascript"))
                     .cloned()
                     .unwrap_or_else(|| "node".into());
-                format!("{cmd} -e '<code block>'")
+                if code_preview.contains('\n') {
+                    format!("{cmd} -e '{}'", Self::truncate_preview(code_preview, 120))
+                } else {
+                    format!("{cmd} -e '{code_preview}'")
+                }
             }
             "ruby" | "rb" => {
                 let cmd = user_runners.get(&lang)
                     .or_else(|| user_runners.get("ruby"))
                     .cloned()
                     .unwrap_or_else(|| "ruby".into());
-                format!("{cmd} -e '<code block>'")
+                if code_preview.contains('\n') {
+                    format!("{cmd} -e '{}'", Self::truncate_preview(code_preview, 120))
+                } else {
+                    format!("{cmd} -e '{code_preview}'")
+                }
             }
             "go" => "go run <temp file>".into(),
             "rust" => "rustc <temp file> && <output>".into(),
@@ -1734,9 +1826,10 @@ impl App {
         content: &str,
         user_runners: &std::collections::HashMap<String, String>,
     ) -> CommandResult {
+        let lang = if lang == "shell" { "bash" } else { lang };
         let output_result = match lang {
             "sh" | "bash" => {
-                let cmd = user_runners.get(lang).map(|s| s.as_str()).unwrap_or("sh");
+                let cmd = user_runners.get(lang).map(|s| s.as_str()).unwrap_or("bash");
                 std::process::Command::new(cmd)
                     .arg("-c")
                     .arg(content)
