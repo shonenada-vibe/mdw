@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.15.0] - 2026-03-17
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.15.0
+
+### Features
+- Add visual line mode (`shift+v`) to select entire lines, vim-style
+- Run selected text as bash by pressing `r` in visual mode
+- Support `shell` as a code block language tag (treated as bash)
+
+### Changed
+- Swap `r` and `ctrl+r` shortcuts: `r` now runs code as bash, `ctrl+r` runs with the marked language
+- Prefer `bash` over `sh` as the default shell runner
+- Console header now shows the actual command being executed instead of `'<code block>'`; multi-line code is truncated to the first line
+
+### Improved
+- Help panel now includes visual line mode, run as bash, and run code block entries
+- Increase help panel height to ensure all shortcuts are visible
+
 ## [v0.14.2] - 2026-03-16
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.14.2
