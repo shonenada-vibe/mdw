@@ -202,6 +202,7 @@ pub enum Action {
     RunCodeBlock,
     RunCodeBlockSh,
     ToggleConsole,
+    ToggleDiagramMode,
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +241,7 @@ pub struct KeybindingsConfig {
     pub run_code_block: Vec<KeyCombo>,
     pub run_code_block_sh: Vec<KeyCombo>,
     pub toggle_console: Vec<KeyCombo>,
+    pub toggle_diagram_mode: Vec<KeyCombo>,
 }
 
 impl Default for KeybindingsConfig {
@@ -274,6 +276,7 @@ impl Default for KeybindingsConfig {
             run_code_block: parse_combos(&["ctrl+r"]),
             run_code_block_sh: parse_combos(&["r"]),
             toggle_console: parse_combos(&["ctrl+t"]),
+            toggle_diagram_mode: parse_combos(&["a"]),
         }
     }
 }
@@ -317,6 +320,7 @@ impl KeybindingsConfig {
             (Action::RunCodeBlock, &self.run_code_block),
             (Action::RunCodeBlockSh, &self.run_code_block_sh),
             (Action::ToggleConsole, &self.toggle_console),
+            (Action::ToggleDiagramMode, &self.toggle_diagram_mode),
         ];
 
         for (action, combos) in bindings {
@@ -469,6 +473,32 @@ impl Default for RunnersConfig {
 }
 
 // ---------------------------------------------------------------------------
+// DiagramConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DiagramConfig {
+    pub render_mode: String,
+    pub mermaid_path: String,
+    pub d2_path: String,
+    pub background: String,
+    pub cli_theme: Option<String>,
+}
+
+impl Default for DiagramConfig {
+    fn default() -> Self {
+        Self {
+            render_mode: "ascii".to_string(),
+            mermaid_path: "mmdc".to_string(),
+            d2_path: "d2".to_string(),
+            background: "transparent".to_string(),
+            cli_theme: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
@@ -479,6 +509,7 @@ pub struct Config {
     pub theme: ThemeConfig,
     pub behavior: BehaviorConfig,
     pub runners: RunnersConfig,
+    pub diagrams: DiagramConfig,
 }
 
 impl Config {
@@ -564,6 +595,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # run_code_block = ["r"]
 # run_code_block_sh = ["ctrl+r"]
 # toggle_console = ["ctrl+t"]
+# toggle_diagram_mode = ["a"]
 
 # [theme]
 # Colors can be named colors or hex "#rrggbb".
@@ -626,6 +658,13 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # ruby = "ruby"
 # go = "go run {file}"
 # rust = "rustc {file} -o {out} && {out}"
+
+# [diagrams]
+# render_mode = "ascii"       # "ascii" (default) or "image"
+# mermaid_path = "mmdc"       # path to mermaid-cli
+# d2_path = "d2"              # path to d2
+# background = "transparent"  # background color for rendered images
+# cli_theme = ""              # optional theme for CLI tools
 "##;
 
 // ---------------------------------------------------------------------------

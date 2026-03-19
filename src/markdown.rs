@@ -7,7 +7,9 @@ use ratatui::text::{Line, Span, Text};
 
 use unicode_width::UnicodeWidthStr;
 
-use crate::config::ThemeConfig;
+use std::hash::{Hash, Hasher};
+
+use crate::config::{DiagramConfig, ThemeConfig};
 use crate::content::{ContentBlock, ImageSource};
 use crate::d2;
 use crate::markmap;
@@ -784,6 +786,7 @@ pub fn render_markdown(
     input: &str,
     theme: &ThemeConfig,
     collapsed_markmap_nodes: &HashSet<String>,
+    diagram_config: &DiagramConfig,
 ) -> (
     Vec<ContentBlock>,
     Vec<LinkInfo>,
@@ -804,7 +807,7 @@ pub fn render_markdown(
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_FOOTNOTES;
     let parser = Parser::new_ext(md_input, options);
-    let mut writer = MarkdownWriter::new(theme.clone(), collapsed_markmap_nodes.clone());
+    let mut writer = MarkdownWriter::new(theme.clone(), collapsed_markmap_nodes.clone(), diagram_config.clone());
 
     if !frontmatter_lines.is_empty() {
         // Add frontmatter link infos (line indices are already relative to block start 0)
@@ -866,10 +869,11 @@ struct MarkdownWriter {
     current_footnote_label: Option<String>,
     collapsed_markmap_nodes: HashSet<String>,
     code_block_infos: Vec<CodeBlockInfo>,
+    diagram_config: DiagramConfig,
 }
 
 impl MarkdownWriter {
-    fn new(theme: ThemeConfig, collapsed_markmap_nodes: HashSet<String>) -> Self {
+    fn new(theme: ThemeConfig, collapsed_markmap_nodes: HashSet<String>, diagram_config: DiagramConfig) -> Self {
         Self {
             lines: Vec::new(),
             current_spans: Vec::new(),
@@ -902,6 +906,7 @@ impl MarkdownWriter {
             current_footnote_label: None,
             collapsed_markmap_nodes,
             code_block_infos: Vec::new(),
+            diagram_config,
         }
     }
 
@@ -1318,25 +1323,66 @@ impl MarkdownWriter {
                 let code_block_start_line = self.block_start_row + self.lines.len();
 
                 if is_diagram {
-                    let rendered = match lang.as_deref() {
-                        Some("mermaid") => mermaid::render_mermaid(&code_content, &self.theme),
-                        Some("d2") => d2::render_d2(&code_content, &self.theme),
-                        Some("mindmap") => mindmap::render_mindmap(&code_content, &self.theme),
-                        Some("markmap") => {
-                            let base = self.block_start_row + self.lines.len();
-                            let result = markmap::render_markmap(
-                                &code_content,
-                                &self.theme,
-                                &self.collapsed_markmap_nodes,
-                                base,
-                            );
-                            self.link_infos.extend(result.link_infos);
-                            result.text
+                    let use_image_mode = self.diagram_config.render_mode == "image"
+                        && matches!(lang.as_deref(), Some("mermaid") | Some("d2"));
+
+                    if use_image_mode {
+                        // Flush pending text lines into a ContentBlock::Text
+                        if !self.lines.is_empty() {
+                            let lines: Vec<Line<'static>> = self.lines.drain(..).collect();
+                            let line_count = lines.len();
+                            self.blocks.push(ContentBlock::Text { lines });
+                            self.block_start_row += line_count;
                         }
-                        _ => unreachable!(),
-                    };
-                    for line in rendered.lines {
-                        self.lines.push(line);
+
+                        let lang_str = lang.as_deref().unwrap();
+                        let mut hasher = std::hash::DefaultHasher::new();
+                        code_content.hash(&mut hasher);
+                        let content_hash = hasher.finish();
+
+                        let tool_path = match lang_str {
+                            "mermaid" => self.diagram_config.mermaid_path.clone(),
+                            "d2" => self.diagram_config.d2_path.clone(),
+                            _ => unreachable!(),
+                        };
+
+                        self.blocks.push(ContentBlock::Image {
+                            alt_text: format!("{lang_str} diagram"),
+                            display_height: 3,
+                            protocol: None,
+                            error: None,
+                            source: ImageSource::Diagram {
+                                lang: lang_str.to_string(),
+                                content: code_content.clone(),
+                                content_hash,
+                                tool_path,
+                                background: self.diagram_config.background.clone(),
+                                cli_theme: self.diagram_config.cli_theme.clone(),
+                            },
+                            cached_image: None,
+                            loading: false,
+                        });
+                    } else {
+                        let rendered = match lang.as_deref() {
+                            Some("mermaid") => mermaid::render_mermaid(&code_content, &self.theme),
+                            Some("d2") => d2::render_d2(&code_content, &self.theme),
+                            Some("mindmap") => mindmap::render_mindmap(&code_content, &self.theme),
+                            Some("markmap") => {
+                                let base = self.block_start_row + self.lines.len();
+                                let result = markmap::render_markmap(
+                                    &code_content,
+                                    &self.theme,
+                                    &self.collapsed_markmap_nodes,
+                                    base,
+                                );
+                                self.link_infos.extend(result.link_infos);
+                                result.text
+                            }
+                            _ => unreachable!(),
+                        };
+                        for line in rendered.lines {
+                            self.lines.push(line);
+                        }
                     }
                 } else if let Some(ref lang_str) = lang {
                     if let Some(highlighted) =
@@ -1508,7 +1554,7 @@ key = "value"
 "#;
         let theme = ThemeConfig::default();
         let collapsed = HashSet::new();
-        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed);
+        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed, &DiagramConfig::default());
 
         assert_eq!(cb_infos.len(), 2, "should have 2 code blocks");
 
@@ -1564,7 +1610,7 @@ key = "value"
 "#;
         let theme = ThemeConfig::default();
         let collapsed = HashSet::new();
-        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed);
+        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed, &DiagramConfig::default());
 
         assert_eq!(cb_infos.len(), 2, "should have 2 code blocks");
         let sh_cb = &cb_infos[0];
@@ -1631,7 +1677,7 @@ quit = ["q", "ctrl+c"]
 "#;
         let theme = ThemeConfig::default();
         let collapsed = HashSet::new();
-        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed);
+        let (blocks, _, _, _, cb_infos) = render_markdown(input, &theme, &collapsed, &DiagramConfig::default());
 
         let brew_cb = cb_infos.iter().find(|cb| cb.content.contains("brew")).unwrap();
         assert_eq!(brew_cb.lang.as_deref(), Some("sh"));

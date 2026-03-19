@@ -109,6 +109,7 @@ pub struct App {
     confirm_code_block_lang: Option<String>,
     event_tx: Option<std::sync::mpsc::Sender<AppEvent>>,
     defer_image_render_until: Option<Instant>,
+    diagram_cache: HashMap<u64, (image::DynamicImage, u16)>,
 }
 
 impl App {
@@ -204,6 +205,7 @@ impl App {
             confirm_code_block_lang: None,
             event_tx: None,
             defer_image_render_until: None,
+            diagram_cache: HashMap::new(),
         };
 
         if app.has_open_file {
@@ -289,6 +291,7 @@ impl App {
             confirm_code_block_lang: None,
             event_tx: None,
             defer_image_render_until: None,
+            diagram_cache: HashMap::new(),
         };
 
         app.raw_content = content;
@@ -498,6 +501,7 @@ impl App {
                 &self.raw_content,
                 &self.config.theme,
                 &self.collapsed_markmap_nodes,
+                &self.config.diagrams,
             );
             self.content_blocks = blocks;
             self.link_infos = links;
@@ -517,6 +521,43 @@ impl App {
                 );
                 self.link_infos = result.link_infos;
                 result.text
+            } else if (self.is_mermaid || self.is_d2)
+                && self.config.diagrams.render_mode == "image"
+            {
+                use std::hash::{Hash, Hasher};
+                let lang = if self.is_mermaid { "mermaid" } else { "d2" };
+                let tool_path = if self.is_mermaid {
+                    self.config.diagrams.mermaid_path.clone()
+                } else {
+                    self.config.diagrams.d2_path.clone()
+                };
+                let mut hasher = std::hash::DefaultHasher::new();
+                self.raw_content.hash(&mut hasher);
+                let content_hash = hasher.finish();
+
+                self.content_blocks = vec![ContentBlock::Image {
+                    alt_text: format!("{lang} diagram"),
+                    display_height: 3,
+                    protocol: None,
+                    error: None,
+                    source: ImageSource::Diagram {
+                        lang: lang.to_string(),
+                        content: self.raw_content.clone(),
+                        content_hash,
+                        tool_path,
+                        background: self.config.diagrams.background.clone(),
+                        cli_theme: self.config.diagrams.cli_theme.clone(),
+                    },
+                    cached_image: None,
+                    loading: false,
+                }];
+                self.start_image_loading();
+
+                self.compute_total_lines();
+                self.clamp_scroll();
+                self.clamp_cursor();
+                self.sync_visual_selection();
+                return;
             } else if self.is_mermaid {
                 mermaid::render_mermaid(&self.raw_content, &self.config.theme)
             } else if self.is_d2 {
@@ -685,12 +726,52 @@ impl App {
         let mut to_load: Vec<(usize, ImageSource)> = Vec::new();
         for (idx, block) in self.content_blocks.iter_mut().enumerate() {
             if let ContentBlock::Image {
-                source, loading, ..
+                source,
+                loading,
+                display_height,
+                protocol,
+                cached_image,
+                error,
+                ..
             } = block
             {
+                // Check diagram cache first
+                if let ImageSource::Diagram { content_hash, .. } = source
+                    && let Some((img, height)) = self.diagram_cache.get(content_hash)
+                {
+                    *display_height = *height;
+                    *protocol = Self::new_thread_protocol(
+                        idx,
+                        self.picker.as_ref(),
+                        self.event_tx.as_ref(),
+                        img.clone(),
+                        cols,
+                        *height,
+                    );
+                    *cached_image = Some(img.clone());
+                    *error = None;
+                    *loading = false;
+                    continue;
+                }
+
                 let source_clone = match source {
                     ImageSource::Local(p) => ImageSource::Local(p.clone()),
                     ImageSource::Remote(u) => ImageSource::Remote(u.clone()),
+                    ImageSource::Diagram {
+                        lang,
+                        content,
+                        content_hash,
+                        tool_path,
+                        background,
+                        cli_theme,
+                    } => ImageSource::Diagram {
+                        lang: lang.clone(),
+                        content: content.clone(),
+                        content_hash: *content_hash,
+                        tool_path: tool_path.clone(),
+                        background: background.clone(),
+                        cli_theme: cli_theme.clone(),
+                    },
                 };
                 *loading = true;
                 to_load.push((idx, source_clone));
@@ -733,6 +814,23 @@ impl App {
         } else {
             80u16
         };
+
+        // Extract diagram info before mutable borrow for fallback
+        let diagram_info = if let ContentBlock::Image {
+            source: ImageSource::Diagram {
+                lang,
+                content,
+                content_hash,
+                ..
+            },
+            ..
+        } = &self.content_blocks[idx]
+        {
+            Some((lang.clone(), content.clone(), *content_hash))
+        } else {
+            None
+        };
+
         if let ContentBlock::Image {
             display_height,
             protocol,
@@ -754,13 +852,47 @@ impl App {
                         cols,
                         height,
                     );
-                    *cached_image = Some(img);
+                    *cached_image = Some(img.clone());
                     *error = None;
+                    // Cache diagram result
+                    if let Some((_, _, hash)) = &diagram_info {
+                        self.diagram_cache.insert(*hash, (img, height));
+                    }
                 }
                 Err(e) => {
-                    *protocol = None;
-                    *error = Some(e);
-                    *display_height = 1;
+                    // For diagram sources, fall back to ASCII rendering
+                    if let Some((lang, content, _)) = &diagram_info {
+                        let tool = match lang.as_str() {
+                            "mermaid" => &self.config.diagrams.mermaid_path,
+                            "d2" => &self.config.diagrams.d2_path,
+                            _ => "",
+                        };
+                        let tip = format!(
+                            "Falling back to ASCII: `{tool}` not found or failed. Install it for image rendering."
+                        );
+                        let rendered = match lang.as_str() {
+                            "mermaid" => {
+                                mermaid::render_mermaid(content, &self.config.theme)
+                            }
+                            "d2" => d2::render_d2(content, &self.config.theme),
+                            _ => {
+                                *protocol = None;
+                                *error = Some(e);
+                                *display_height = 1;
+                                self.fixup_code_block_offsets();
+                                self.compute_total_lines();
+                                return;
+                            }
+                        };
+                        self.content_blocks[idx] = ContentBlock::Text {
+                            lines: rendered.lines.into_iter().collect(),
+                        };
+                        self.show_toast(tip);
+                    } else {
+                        *protocol = None;
+                        *error = Some(e);
+                        *display_height = 1;
+                    }
                 }
             }
         }
@@ -1126,6 +1258,17 @@ impl App {
             }
             Action::ToggleConsole => {
                 self.console_visible = !self.console_visible;
+            }
+            Action::ToggleDiagramMode => {
+                if self.config.diagrams.render_mode == "image" {
+                    self.config.diagrams.render_mode = "ascii".to_string();
+                    self.show_toast("Diagram mode: ASCII".to_string());
+                } else {
+                    self.config.diagrams.render_mode = "image".to_string();
+                    self.show_toast("Diagram mode: Image".to_string());
+                }
+                self.diagram_cache.clear();
+                self.render_content();
             }
         }
 

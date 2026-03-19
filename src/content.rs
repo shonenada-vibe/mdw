@@ -25,4 +25,12 @@ pub enum ContentBlock {
 pub enum ImageSource {
     Local(PathBuf),
     Remote(String),
+    Diagram {
+        lang: String,
+        content: String,
+        content_hash: u64,
+        tool_path: String,
+        background: String,
+        cli_theme: Option<String>,
+    },
 }
