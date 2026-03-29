@@ -91,6 +91,7 @@ pub struct App {
     collapsed_markmap_nodes: HashSet<String>,
     collapsed_json_nodes: HashSet<String>,
     file_tree_view: bool,
+    file_tree_focused: bool,
     file_tree: FileTree,
     file_tree_selected: usize,
     file_tree_scroll: usize,
@@ -189,6 +190,7 @@ impl App {
             collapsed_markmap_nodes: HashSet::new(),
             collapsed_json_nodes: HashSet::new(),
             file_tree_view: start_in_file_tree,
+            file_tree_focused: start_in_file_tree,
             file_tree,
             file_tree_selected: 0,
             file_tree_scroll: 0,
@@ -277,6 +279,7 @@ impl App {
             collapsed_markmap_nodes: HashSet::new(),
             collapsed_json_nodes: HashSet::new(),
             file_tree_view: false,
+            file_tree_focused: false,
             file_tree: FileTree::empty(PathBuf::from(".")),
             file_tree_selected: 0,
             file_tree_scroll: 0,
@@ -713,6 +716,8 @@ impl App {
 
         if let Err(error) = self.open_file(entry.path.clone()) {
             self.show_error_toast(format!("Error: {error}"));
+        } else {
+            self.file_tree_focused = false;
         }
     }
 
@@ -1194,14 +1199,14 @@ impl App {
         match action {
             Action::Quit => self.should_quit = true,
             Action::ScrollDown => {
-                if self.file_tree_view {
+                if self.file_tree_focused {
                     self.move_file_tree_selection(scroll_speed as isize);
                 } else {
                     self.move_cursor_vertical(scroll_speed as isize);
                 }
             }
             Action::ScrollUp => {
-                if self.file_tree_view {
+                if self.file_tree_focused {
                     self.move_file_tree_selection(-(scroll_speed as isize));
                 } else {
                     self.move_cursor_vertical(-(scroll_speed as isize));
@@ -1259,15 +1264,23 @@ impl App {
             Action::ToggleFileTree => {
                 self.file_tree_view = !self.file_tree_view;
                 if self.file_tree_view {
+                    self.file_tree_focused = true;
                     self.refresh_file_tree();
                     self.scroll_file_tree_to_top();
+                } else {
+                    self.file_tree_focused = false;
+                }
+            }
+            Action::FocusFileTree => {
+                if self.file_tree_view {
+                    self.file_tree_focused = !self.file_tree_focused;
                 }
             }
             Action::FileTreeParent => {
                 self.go_to_parent_in_file_tree();
             }
             Action::Activate => {
-                if self.file_tree_view {
+                if self.file_tree_focused {
                     self.open_selected_tree_entry();
                 } else {
                     self.activate_cursor();
@@ -2314,6 +2327,10 @@ impl App {
 
     pub fn file_tree_view(&self) -> bool {
         self.file_tree_view
+    }
+
+    pub fn file_tree_focused(&self) -> bool {
+        self.file_tree_focused
     }
 
     pub fn file_tree(&self) -> &FileTree {

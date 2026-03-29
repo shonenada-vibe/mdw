@@ -96,6 +96,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_file_tree_panel(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConfig) {
+    let focused = app.file_tree_focused();
     let block = Block::default()
         .title(format!(" Files: {} ", app.file_tree().root().display()))
         .borders(Borders::ALL)
@@ -126,7 +127,11 @@ fn render_file_tree_panel(frame: &mut Frame, app: &App, area: Rect, theme: &Them
         .enumerate()
         .map(|(offset, entry)| {
             let index = scroll + offset;
-            let marker = if index == selected { ">" } else { " " };
+            let marker = if focused && index == selected {
+                ">"
+            } else {
+                " "
+            };
             let indent = "  ".repeat(entry.depth);
             let label = if entry.is_dir {
                 let arrow = if app.file_tree().is_expanded(&entry.path) {
@@ -138,7 +143,7 @@ fn render_file_tree_panel(frame: &mut Frame, app: &App, area: Rect, theme: &Them
             } else {
                 entry.name.clone()
             };
-            let style = if index == selected {
+            let style = if focused && index == selected {
                 cursor_style
             } else if entry.is_dir {
                 dir_style

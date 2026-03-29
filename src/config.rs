@@ -195,6 +195,7 @@ pub enum Action {
     ToggleSplitView,
     ToggleMarkmap,
     ToggleFileTree,
+    FocusFileTree,
     FileTreeParent,
     Activate,
     ToggleVisualMode,
@@ -235,6 +236,7 @@ pub struct KeybindingsConfig {
     pub toggle_split_view: Vec<KeyCombo>,
     pub toggle_markmap: Vec<KeyCombo>,
     pub toggle_file_tree: Vec<KeyCombo>,
+    pub focus_file_tree: Vec<KeyCombo>,
     pub file_tree_parent: Vec<KeyCombo>,
     pub activate: Vec<KeyCombo>,
     pub toggle_visual_mode: Vec<KeyCombo>,
@@ -249,7 +251,7 @@ pub struct KeybindingsConfig {
 impl Default for KeybindingsConfig {
     fn default() -> Self {
         Self {
-            quit: parse_combos(&["q", "ctrl+c"]),
+            quit: parse_combos(&["q", "ctrl+c", "esc"]),
             scroll_down: parse_combos(&["j", "down"]),
             scroll_up: parse_combos(&["k", "up"]),
             cursor_left: parse_combos(&["h", "left"]),
@@ -271,6 +273,7 @@ impl Default for KeybindingsConfig {
             toggle_split_view: parse_combos(&["s"]),
             toggle_markmap: parse_combos(&["m"]),
             toggle_file_tree: parse_combos(&["t"]),
+            focus_file_tree: parse_combos(&["tab"]),
             file_tree_parent: parse_combos(&["-"]),
             activate: parse_combos(&["enter", "o"]),
             toggle_visual_mode: parse_combos(&["v"]),
@@ -316,6 +319,7 @@ impl KeybindingsConfig {
             (Action::ToggleSplitView, &self.toggle_split_view),
             (Action::ToggleMarkmap, &self.toggle_markmap),
             (Action::ToggleFileTree, &self.toggle_file_tree),
+            (Action::FocusFileTree, &self.focus_file_tree),
             (Action::FileTreeParent, &self.file_tree_parent),
             (Action::Activate, &self.activate),
             (Action::ToggleVisualMode, &self.toggle_visual_mode),
