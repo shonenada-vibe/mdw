@@ -724,6 +724,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConf
         let split_indicator = if app.split_view() { " [Split]" } else { "" };
         let tree_indicator = if app.file_tree_view() { " [Tree]" } else { "" };
         let visual_indicator = if app.visual_mode() { " [VISUAL]" } else { "" };
+        let specstory_indicator = if app.spec_history_view() {
+            " [SpecStory]"
+        } else {
+            ""
+        };
         let cursor_indicator = app
             .cursor_line()
             .map(|line| format!(" | {}:{}", line + 1, app.cursor_col() + 1))
@@ -734,13 +739,14 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &ThemeConf
             String::new()
         };
         let scroll_info = format!(
-            " {} | {}/{}{}{}{}{}{} ",
+            " {} | {}/{}{}{}{}{}{}{} ",
             app.file_path_display(),
             app.scroll_offset() + 1,
             app.total_lines(),
             split_indicator,
             tree_indicator,
             visual_indicator,
+            specstory_indicator,
             cursor_indicator,
             image_indicator,
         );
@@ -834,6 +840,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, theme: &ThemeConfig) {
         ("Prev Match", fmt_keys(&kb.search_prev)),
         ("Split View", fmt_keys(&kb.toggle_split_view)),
         ("Markmap", fmt_keys(&kb.toggle_markmap)),
+        ("SpecStory", fmt_keys(&kb.toggle_spec_history)),
         ("File Tree", fmt_keys(&kb.toggle_file_tree)),
         ("Tree Parent", fmt_keys(&kb.file_tree_parent)),
         ("Visual Mode", fmt_keys(&kb.toggle_visual_mode)),

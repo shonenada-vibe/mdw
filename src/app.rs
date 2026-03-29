@@ -22,6 +22,7 @@ use crate::markdown::{CodeBlockInfo, LinkInfo};
 use crate::markmap;
 use crate::mermaid;
 use crate::mindmap;
+use crate::specstory;
 use crate::syntax_highlight;
 use crate::ui;
 use crate::watcher;
@@ -110,6 +111,8 @@ pub struct App {
     event_tx: Option<std::sync::mpsc::Sender<AppEvent>>,
     defer_image_render_until: Option<Instant>,
     diagram_cache: HashMap<u64, (image::DynamicImage, u16)>,
+    spec_history_view: bool,
+    is_specstory: bool,
 }
 
 impl App {
@@ -206,6 +209,8 @@ impl App {
             event_tx: None,
             defer_image_render_until: None,
             diagram_cache: HashMap::new(),
+            spec_history_view: false,
+            is_specstory: false,
         };
 
         if app.has_open_file {
@@ -292,9 +297,12 @@ impl App {
             event_tx: None,
             defer_image_render_until: None,
             diagram_cache: HashMap::new(),
+            spec_history_view: false,
+            is_specstory: false,
         };
 
         app.raw_content = content;
+        app.detect_specstory();
         app.render_content();
         Ok(app)
     }
@@ -439,8 +447,17 @@ impl App {
         }
         self.raw_content = std::fs::read_to_string(&self.file_path)
             .with_context(|| format!("Failed to read {}", self.file_path.display()))?;
+        self.detect_specstory();
         self.render_content();
         Ok(())
+    }
+
+    fn detect_specstory(&mut self) {
+        let detected = specstory::is_specstory(&self.raw_content);
+        self.is_specstory = detected;
+        if detected && !self.spec_history_view {
+            self.spec_history_view = true;
+        }
     }
 
     fn render_content(&mut self) {
@@ -485,6 +502,16 @@ impl App {
                 loading: false,
             }];
             self.start_image_loading();
+        } else if self.is_markdown && self.spec_history_view {
+            // Subtract gutter (line numbers + separator) and scrollbar (1 col)
+            let gutter_total = self.gutter_width as u16 + 3;
+            let usable_width = self.content_width.saturating_sub(gutter_total + 1);
+            self.content_blocks = specstory::render_specstory(
+                &self.raw_content,
+                &self.config.theme,
+                usable_width,
+            );
+            self.link_infos = vec![];
         } else if self.is_markdown && self.markmap_view {
             let result = markmap::render_markmap(
                 &self.raw_content,
@@ -693,6 +720,8 @@ impl App {
         self.file_path = path;
         self.has_open_file = true;
         self.update_file_kind_flags();
+        self.spec_history_view = false;
+        self.is_specstory = false;
         self.search_matches.clear();
         self.current_match = None;
         self.selection = None;
@@ -1258,6 +1287,10 @@ impl App {
             }
             Action::ToggleConsole => {
                 self.console_visible = !self.console_visible;
+            }
+            Action::ToggleSpecHistory => {
+                self.spec_history_view = !self.spec_history_view;
+                self.render_content();
             }
             Action::ToggleDiagramMode => {
                 if self.config.diagrams.render_mode == "image" {
@@ -2220,8 +2253,13 @@ impl App {
     }
 
     pub fn set_content_area(&mut self, x: u16, width: u16) {
+        let old_width = self.content_width;
         self.content_x = x;
         self.content_width = width;
+        // Re-render specstory bubbles when width changes (they depend on terminal width)
+        if self.spec_history_view && width != old_width && width > 0 {
+            self.render_content();
+        }
     }
 
     pub fn defer_image_render(&mut self) {
@@ -2264,6 +2302,10 @@ impl App {
 
     pub fn split_view(&self) -> bool {
         self.split_view
+    }
+
+    pub fn spec_history_view(&self) -> bool {
+        self.spec_history_view
     }
 
     pub fn raw_content(&self) -> &str {

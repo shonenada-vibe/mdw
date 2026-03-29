@@ -203,6 +203,7 @@ pub enum Action {
     RunCodeBlockSh,
     ToggleConsole,
     ToggleDiagramMode,
+    ToggleSpecHistory,
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +243,7 @@ pub struct KeybindingsConfig {
     pub run_code_block_sh: Vec<KeyCombo>,
     pub toggle_console: Vec<KeyCombo>,
     pub toggle_diagram_mode: Vec<KeyCombo>,
+    pub toggle_spec_history: Vec<KeyCombo>,
 }
 
 impl Default for KeybindingsConfig {
@@ -269,7 +271,7 @@ impl Default for KeybindingsConfig {
             toggle_split_view: parse_combos(&["s"]),
             toggle_markmap: parse_combos(&["m"]),
             toggle_file_tree: parse_combos(&["t"]),
-            file_tree_parent: parse_combos(&["u"]),
+            file_tree_parent: parse_combos(&["-"]),
             activate: parse_combos(&["enter", "o"]),
             toggle_visual_mode: parse_combos(&["v"]),
             toggle_visual_line_mode: parse_combos(&["V", "shift+v"]),
@@ -277,6 +279,7 @@ impl Default for KeybindingsConfig {
             run_code_block_sh: parse_combos(&["r"]),
             toggle_console: parse_combos(&["ctrl+t"]),
             toggle_diagram_mode: parse_combos(&["a"]),
+            toggle_spec_history: parse_combos(&["u"]),
         }
     }
 }
@@ -321,6 +324,7 @@ impl KeybindingsConfig {
             (Action::RunCodeBlockSh, &self.run_code_block_sh),
             (Action::ToggleConsole, &self.toggle_console),
             (Action::ToggleDiagramMode, &self.toggle_diagram_mode),
+            (Action::ToggleSpecHistory, &self.toggle_spec_history),
         ];
 
         for (action, combos) in bindings {
@@ -589,13 +593,14 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdw configuration file
 # toggle_split_view = ["s"]
 # toggle_markmap = ["m"]
 # toggle_file_tree = ["t"]
-# file_tree_parent = ["u"]
+# file_tree_parent = ["-"]
 # activate = ["enter", "o"]
 # toggle_visual_mode = ["v"]
 # run_code_block = ["r"]
 # run_code_block_sh = ["ctrl+r"]
 # toggle_console = ["ctrl+t"]
 # toggle_diagram_mode = ["a"]
+# toggle_spec_history = ["u"]
 
 # [theme]
 # Colors can be named colors or hex "#rrggbb".

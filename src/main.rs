@@ -9,6 +9,7 @@ mod markdown;
 mod markmap;
 mod mermaid;
 mod mindmap;
+mod specstory;
 mod syntax_highlight;
 mod ui;
 mod watcher;
