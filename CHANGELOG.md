@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.16.1] - 2026-03-29
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.16.1
+
+### Features
+- Add `Esc` key as quit binding in normal mode alongside `q` and `ctrl+c`
+- Add `Tab` to toggle focus between file tree sidebar and file viewer
+- Separate file tree visibility from focus; hide cursor marker and highlight style in sidebar when not focused
+- Opening a file from sidebar automatically focuses back to the file viewer
+
+## [v0.16.0] - 2026-03-29
+
+https://github.com/shonenada-vibe/mdw/releases/tag/v0.16.0
+
+### Features
+- Add SpecStory history view mode with IM-style chat bubble rendering for `.specstory/history/*.md` files
+  - Auto-detect SpecStory files by header comment and render in chat mode by default
+  - Press `u` to toggle between normal markdown and bubble view
+  - Blue borders for user messages, green for agent messages
+  - Collapse `<think>` and `<tool-use>` blocks into summary lines
+  - Unicode-safe text wrapping for CJK and multi-byte content
+  - Re-render bubbles on terminal resize
+- Add image rendering for D2/Mermaid diagrams via real `d2` and `mmdc` CLI tools
+  - Render diagrams as PNG images through the ratatui-image pipeline
+  - Fall back to ASCII art with a toast notification when tools are missing
+  - Cache rendered diagrams by content hash to avoid re-rendering
+  - Add `a` keybinding to toggle between ASCII and image diagram modes
+  - Add `DiagramConfig` for render mode, tool paths, background, and theme
+
+### Changed
+- Reassign file tree parent shortcut from `u` to `-`
+
 ## [v0.15.0] - 2026-03-17
 
 https://github.com/shonenada-vibe/mdw/releases/tag/v0.15.0
